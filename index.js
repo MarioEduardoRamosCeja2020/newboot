@@ -6,93 +6,53 @@ const ytdl = require('ytdl-core');
 const fs = require('fs');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
+const ffmpegPath = require('ffmpeg-static');
+
+// Configurar ffmpeg
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 // --------------------- EXPRESS PARA PING ---------------------
 const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/ping', (req, res) => res.send('Bot activo ✅'));
-app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
+const PORT = process.env.PORT || 3003;
+app.get('/', (req, res) => res.send('🤖 Bot WhatsApp activo'));
+app.listen(PORT, () => console.log(`✅ Servidor activo en puerto ${PORT}`));
 
 // --------------------- CLIENTE DE WHATSAPP ---------------------
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'bot-admin' }),
-    puppeteer: { headless: true }
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        args: ['--no-sandbox'],
+        headless: true
+    }
 });
 
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
-
-client.on('ready', () => {
-    console.log('🤖 Bot conectado a WhatsApp Web');
-});
+client.on('ready', () => console.log('🤖 Bot conectado a WhatsApp Web'));
+client.initialize();
 
 // --------------------- COMANDOS DEL BOT ---------------------
 client.on('message', async msg => {
     const chat = await msg.getChat();
-    const isGroup = chat.isGroup;
 
-    // --------- COMANDOS DEL GRUPO ---------
-    if (msg.body.startsWith('.todos') && isGroup) {
-        let text = msg.body.replace('.todos', '').trim() || '¡Hola a todos!';
-        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id) });
+    // Comando ping
+    if (msg.body === '.ping') {
+        msg.reply('🏓 Pong! El bot está activo');
     }
 
-    if (msg.body.startsWith('.hidetag') && isGroup) {
-        let text = msg.body.replace('.hidetag', '').trim() || 'Mensaje para todos';
-        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id) });
-    }
-
-    if (msg.body.startsWith('.notify') && isGroup) {
-        let text = msg.body.replace('.notify', '').trim() || 'Atención!';
-        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id) });
-    }
-
-    // --------- STICKERS ---------
-    if (msg.body.startsWith('.s')) {
-        if (msg.hasMedia) {
-            const media = await msg.downloadMedia();
-            const mediaPath = path.join('./temp', `temp.${media.mimetype.split('/')[1]}`);
-            fs.writeFileSync(mediaPath, Buffer.from(media.data, 'base64'));
-
-            const stickerPath = path.join('./temp', 'sticker.webp');
-            ffmpeg(mediaPath)
-                .outputOptions(['-vcodec libwebp', '-vf scale=512:512:force_original_aspect_ratio=decrease'])
-                .save(stickerPath)
-                .on('end', async () => {
-                    const sticker = MessageMedia.fromFilePath(stickerPath);
-                    chat.sendMessage(sticker, { sendMediaAsSticker: true });
-                    fs.unlinkSync(mediaPath);
-                    fs.unlinkSync(stickerPath);
-                });
-        }
-    }
-
-    // --------- YOUTUBE A AUDIO ---------
+    // Descargar audio de YouTube
     if (msg.body.startsWith('.yt')) {
-        const url = msg.body.replace('.yt', '').trim();
-        if (ytdl.validateURL(url)) {
-            const info = await ytdl.getInfo(url);
-            const audioPath = path.join('./temp', `${info.videoDetails.title}.mp3`);
-            ytdl(url, { filter: 'audioonly' }).pipe(fs.createWriteStream(audioPath))
-                .on('finish', () => {
-                    const media = MessageMedia.fromFilePath(audioPath);
-                    chat.sendMessage(media);
-                    fs.unlinkSync(audioPath);
-                });
-        } else {
-            chat.sendMessage('URL inválida 😅');
-        }
-    }
+        const url = msg.body.split(' ')[1];
+        if (!ytdl.validateURL(url)) return msg.reply('❌ URL inválida');
+        const info = await ytdl.getInfo(url);
+        const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
+        const filePath = path.join(__dirname, 'temp', `${title}.mp3`);
 
-    // --------- JUEGO DE MESA ---------
-    if (msg.body.startsWith('.mesa4') || msg.body.startsWith('.mesa6')) {
-        const [command, ...textParts] = msg.body.split(' ');
-        const text = textParts.join(' ');
-        const players = command === '.mesa4' ? 4 : 6;
-        const mentions = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
-        const mentionText = mentions.map(p => `@${p.id.user}`).join(' ');
-        chat.sendMessage(`Mesa de ${players}: ${mentionText}\n${text}`, { mentions });
+        ytdl(url, { filter: 'audioonly' })
+            .pipe(fs.createWriteStream(filePath))
+            .on('finish', async () => {
+                const media = MessageMedia.fromFilePath(filePath);
+                await chat.sendMessage(media, { caption: `🎧 ${info.videoDetails.title}` });
+                fs.unlinkSync(filePath);
+            });
     }
 });
-
-// --------------------- INICIAR CLIENTE ---------------------
-client.initialize();

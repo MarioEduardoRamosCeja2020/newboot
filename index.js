@@ -1,117 +1,110 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const fs = require('fs');
-const path = require('path');
-const sharp = require('sharp');
-const { exec } = require('child_process');
+const qrcode = require('qrcode-terminal');
+const express = require('express'); // Para mantener el servicio vivo en Render
+const app = express();
+
+const PORT = process.env.PORT || 3003; // Render asigna el puerto vía variable de entorno
 
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './session', clientId: "client1" }),
+    authStrategy: new LocalAuth({ clientId: "default" }),
     puppeteer: { headless: true }
 });
 
-// Mensaje al iniciar
-client.on('ready', () => {
-    console.log('🐐🇫🇷 🎉 Ya estoy listo para usarse, arriba las Chivas prrs!');
+client.on('qr', qr => {
+    qrcode.generate(qr, { small: true });
+    console.log('🐐🇫🇷 ⚠️ Escanea el QR para iniciar sesión');
 });
 
-// Evitar crashes por errores inesperados
-process.on('uncaughtException', function (err) {
-    if (err.code === 'EBUSY') {
-        console.warn('⚠️ Archivo de sesión ocupado, ignorando...');
-    } else {
-        console.error(err);
+client.on('ready', async () => {
+    console.log('🐐🇫🇷 🎉 Ya estoy listo para usarse, arriba las Chivas prrs!');
+
+    // Aviso a todos los grupos activos
+    const chats = await client.getChats();
+    for (let chat of chats.filter(c => c.isGroup)) {
+        chat.sendMessage('🐐🇫🇷 🎉 Ya estoy listo para usarse, arriba las Chivas prrs!');
     }
 });
 
 client.on('message', async msg => {
     const chat = await msg.getChat();
 
-    // ---- Sticker de imagen o video ----
-    if (msg.body.startsWith('.sticker') && msg.hasMedia) {
-        try {
-            const media = await msg.downloadMedia();
-            const buffer = Buffer.from(media.data, 'base64');
-            const tempFile = path.join(__dirname, 'temp');
-            let outputFile = tempFile + '.webp';
+    // --------- MENÚ DE COMANDOS ---------
+    if (msg.body.startsWith('.bot')) {
+        const menu = `
+🐐🇫🇷 *ChivasBot - Menú de Comandos* 🎉
 
-            if (media.mimetype.includes('image')) {
-                await sharp(buffer)
-                    .resize(512, 512, { fit: 'contain' })
-                    .toFile(outputFile);
-                const sticker = MessageMedia.fromFilePath(outputFile);
-                await chat.sendMessage(sticker, { sendMediaAsSticker: true });
-            } else if (media.mimetype.includes('video')) {
-                const inputVideo = tempFile + '.mp4';
-                fs.writeFileSync(inputVideo, buffer);
-                outputFile = tempFile + '.webp';
+*Comandos de utilidad:*
+- .bot : Mostrar este menú
+- .todos : Etiquetar a todos los miembros del grupo
+- .notify <mensaje> : Enviar mensaje con mención a todos
+- .hidetag <mensaje> : Enviar mensaje ocultando menciones
 
-                // Convertir video a sticker
-                await new Promise((resolve, reject) => {
-                    exec(`ffmpeg -i "${inputVideo}" -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15,format=rgba" -loop 0 "${outputFile}"`, (err) => {
-                        if (err) reject(err);
-                        else resolve();
-                    });
-                });
+*Comandos divertidos:*
+- .sticker : Crear sticker grande desde imagen o video
+- .mesa4 <texto> : Crear mesa para 4 jugadores con mensaje
+- .mesa6 <texto> : Crear mesa para 6 jugadores con mensaje
 
-                const sticker = MessageMedia.fromFilePath(outputFile);
-                await chat.sendMessage(sticker, { sendMediaAsSticker: true });
-                fs.unlinkSync(inputVideo);
-            }
-
-            fs.unlinkSync(outputFile);
-        } catch (e) {
-            console.error('❌ Error creando sticker:', e);
-            chat.sendMessage('🐐🇫🇷 ❌ Error creando sticker, revisa el archivo.');
-        }
+⚡ Usa los comandos y diviértete con tu grupo!
+`;
+        chat.sendMessage(menu);
     }
 
-    // ---- .todos ----
-    if (msg.body === '.todos' && chat.isGroup) {
-        const mentions = chat.participants.map(p => p.id._serialized);
-        const mentionText = mentions.map(u => `@${u.split('@')[0]}`).join(' ');
-        chat.sendMessage(`🐐🇫🇷 Todos: ${mentionText}`, { mentions: chat.participants });
+    // --------- ETIQUETAR A TODOS ---------
+    if (msg.body.startsWith('.todos')) {
+        if (!chat.isGroup) return;
+        const mentions = chat.participants.map(p => p.id.user);
+        const mentionText = mentions.map(u => `@${u}`).join(' ');
+        chat.sendMessage(mentionText, { mentions: chat.participants.map(p => p.id) });
     }
 
-    // ---- .notify ----
-    if (msg.body.startsWith('.notify') && chat.isGroup) {
-        const parts = msg.body.split(' ');
-        const number = parts[1];
-        const user = chat.participants.find(p => p.id.user === number);
-        if (user) await chat.sendMessage(`🐐🇫🇷 @${user.id.user}`, { mentions: [user] });
+    // --------- NOTIFY ---------
+    if (msg.body.startsWith('.notify')) {
+        if (!chat.isGroup) return;
+        const text = msg.body.slice(8).trim();
+        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id) });
     }
 
-    // ---- .hidetag ----
-    if (msg.body.startsWith('.hidetag') && chat.isGroup) {
-        const text = msg.body.replace('.hidetag', '').trim();
-        await chat.sendMessage(text, { mentions: chat.participants });
+    // --------- HIDETAG ---------
+    if (msg.body.startsWith('.hidetag')) {
+        if (!chat.isGroup) return;
+        const text = msg.body.slice(8).trim();
+        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id), sendSeen: false });
     }
 
-    // ---- Abrir / Cerrar grupo ----
-    if (msg.body === '.abrir grupo' && chat.isGroup) await chat.setMessagesAdminsOnly(false);
-    if (msg.body === '.cerrar grupo' && chat.isGroup) await chat.setMessagesAdminsOnly(true);
-
-    // ---- .boy (menú de comandos) ----
-    if (msg.body === '.boy') {
-        chat.sendMessage(
-`🐐🇫🇷 Menú de comandos:
-.sticker -> crea sticker de imagen o video
-.todos -> etiqueta a todos
-.notify <num> -> notifica a un usuario
-.hidetag -> mensaje ocultando a todos
-.abrir grupo / .cerrar grupo -> control del chat
-.mesa4 / .mesa6 -> juego de mesa con menciones`
-        );
-    }
-
-    // ---- Juego de mesa ----
+    // --------- JUEGO DE MESA ---------
     if (msg.body.startsWith('.mesa4') || msg.body.startsWith('.mesa6')) {
         const [command, ...textParts] = msg.body.split(' ');
         const text = textParts.join(' ');
         const players = command === '.mesa4' ? 4 : 6;
         const mentions = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
         const mentionText = mentions.map(p => `@${p.id.user}`).join(' ');
-        chat.sendMessage(`🐐🇫🇷 Mesa de ${players}: ${mentionText}\n${text}`, { mentions });
+        chat.sendMessage(`Mesa de ${players}: ${mentionText}\n${text}`, { mentions });
+    }
+
+    // --------- STICKERS GRANDES ---------
+    if (msg.body.startsWith('.sticker')) {
+        if (msg.hasMedia) {
+            const media = await msg.downloadMedia();
+            try {
+                const sticker = new MessageMedia(media.mimetype, media.data, 'sticker');
+                chat.sendMessage(sticker, { sendMediaAsSticker: true, stickerName: 'ChivasBot', stickerAuthor: '🐐🇫🇷' });
+            } catch (err) {
+                console.log('❌ Error creando sticker:', err);
+                chat.sendMessage('❌ Error creando sticker, asegúrate de enviar imagen o video compatible.');
+            }
+        } else {
+            chat.sendMessage('📌 Por favor envía una imagen o video con el comando .sticker');
+        }
     }
 });
 
 client.initialize();
+
+// --------- EXPRESS SERVER PARA RENDER ---------
+app.get('/', (req, res) => {
+    res.send('🐐🇫🇷 ChivasBot está activo!');
+});
+
+app.listen(PORT, () => {
+    console.log(`Servidor activo en puerto ${PORT}`);
+});

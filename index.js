@@ -1,34 +1,36 @@
-import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
+// index.js
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth, MessageMedia } = pkg;
+
 import qrcode from 'qrcode-terminal';
 
-// Render asigna puerto automáticamente
 const PORT = process.env.PORT || 10000;
 
-// Usamos LocalAuth para guardar la sesión en /root/.wwebjs_auth (Render)
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: 'bot' }),
     puppeteer: { headless: true }
 });
 
-// QR code para la primera conexión
+// Genera QR en consola si no hay sesión
 client.on('qr', qr => {
     qrcode.generate(qr, { small: true });
     console.log('🐐🇫🇷 ⚠️ Escanea este QR para iniciar sesión');
 });
 
-// Evento ready: sesión guardada y bot activo
+// Cuando el bot está listo
 client.on('ready', async () => {
-    console.log(`🐐🇫🇷 🎉 Bot activo en Render en puerto ${PORT}!`);
+    console.log(`🐐🇫🇷 🎉 Bot activo y listo en Render en puerto ${PORT}!`);
 
-    // Avisar a todos los grupos que el bot está listo
     const chats = await client.getChats();
     const groups = chats.filter(c => c.isGroup);
+
+    // Notificar a todos los grupos donde esté
     for (const group of groups) {
         await group.sendMessage('🐐🇫🇷 🎉 ¡Bot activo y listo para usarse! Usa .bot para ver el menú de comandos.');
     }
 });
 
-// Manejo de mensajes y comandos
+// Comandos
 client.on('message', async msg => {
     const chat = await msg.getChat();
     const args = msg.body.split(' ');
@@ -36,7 +38,6 @@ client.on('message', async msg => {
     const text = args.slice(1).join(' ');
 
     try {
-        // ---- Menú de comandos ----
         if(command === '.bot'){
             let menu = `🐐🇫🇷 *Menú de comandos*\n\n`;
             menu += `.bot - Mostrar este menú\n`;
@@ -48,27 +49,23 @@ client.on('message', async msg => {
             await chat.sendMessage(menu);
         }
 
-        // ---- Etiquetar a todos ----
         if(command === '.todos' && chat.isGroup){
             const mentions = chat.participants.map(p => p.id._serialized);
             const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
             await chat.sendMessage(`${mentionText} ${text}`, { mentions });
         }
 
-        // ---- Hidetag ----
         if(command === '.hidetag' && chat.isGroup){
             const mentions = chat.participants.map(p => p.id._serialized);
             await chat.sendMessage(text, { mentions });
         }
 
-        // ---- Notify ----
         if(command === '.notify' && chat.isGroup){
             const mentions = chat.participants.map(p => p.id._serialized);
             const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
             await chat.sendMessage(`${mentionText} ${text}`, { mentions });
         }
 
-        // ---- Juego de mesa ----
         if((command === '.mesa4' || command === '.mesa6') && chat.isGroup){
             const players = command === '.mesa4' ? 4 : 6;
             const shuffled = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
@@ -77,7 +74,6 @@ client.on('message', async msg => {
             await chat.sendMessage(`Mesa de ${players}: ${mentionText}\n${text}`, { mentions });
         }
 
-        // ---- Sticker ----
         if(command === '.sticker'){
             if(msg.hasMedia){
                 const media = await msg.downloadMedia();
@@ -93,5 +89,4 @@ client.on('message', async msg => {
     }
 });
 
-// Inicializar bot
 client.initialize();

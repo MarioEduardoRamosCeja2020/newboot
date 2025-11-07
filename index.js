@@ -1,138 +1,116 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const express = require('express');
-const ytdl = require('ytdl-core');
-const ytSearch = require('yt-search');
+const fs = require('fs');
+const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
-const stream = require('stream');
-const sharp = require('sharp');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const app = express();
-const PORT = process.env.PORT || 3003;
-app.get('/', (req, res) => res.send('🐐🇫🇷 🤖 Bot WhatsApp activo'));
-app.listen(PORT, () => console.log(`🐐🇫🇷 ✅ Servidor activo en puerto ${PORT}`));
+const prefix = '🐐🇫🇷';
 
-// --------------------- CLIENTE ---------------------
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'bot-admin' }),
-    puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
+    authStrategy: new LocalAuth({ clientId: "chivabot" }),
+    puppeteer: { headless: true }
 });
 
-client.on('qr', qr => qrcode.generate(qr, { small: true }));
-client.on('ready', () => console.log('🐐🇫🇷 🤖 Bot conectado a WhatsApp Web'));
-client.on('authenticated', () => console.log('🐐🇫🇷 ✅ Sesión autenticada'));
-client.on('auth_failure', msg => console.error('🐐🇫🇷 ❌ Error de autenticación:', msg));
-client.on('disconnected', reason => {
-    console.warn('🐐🇫🇷 ⚠️ Cliente desconectado:', reason);
-    client.initialize();
+// ====================== Inicio ======================
+client.on('qr', qr => {
+    qrcode.generate(qr, { small: true });
+    console.log(`${prefix} 📸 Escanea este QR con WhatsApp Web`);
 });
 
-client.initialize();
+client.on('ready', () => {
+    console.log(`${prefix} 🎉 Ya estoy listo para usarse, arriba las Chivas prrs!`);
+});
 
-// --------------------- COMANDOS ---------------------
+// ====================== Comandos ======================
 client.on('message', async msg => {
+    const chat = await msg.getChat();
+    const text = msg.body || '';
+    
     try {
-        const chat = await msg.getChat();
-        const text = msg.body.trim();
-        const isGroup = chat.isGroup;
-
-        // ---------- Ping ----------
-        if (text === '.ping') return msg.reply('🐐🇫🇷 🏓 Pong! El bot está activo');
-
-        // ---------- Comandos de grupo ----------
-        if (isGroup && (text.startsWith('.todos') || text.startsWith('.hidetag') || text.startsWith('.notify'))) {
-            const command = text.split(' ')[0];
-            const message = text.replace(command, '').trim() || '🐐🇫🇷 👋 ¡Hola a todos!';
-            return chat.sendMessage(message, { mentions: chat.participants.map(p => p.id) });
-        }
-
-        // ---------- Stickers ----------
+        // --------- Sticker gigante y animado ---------
         if (text.startsWith('.s')) {
-            if (!msg.hasMedia) return msg.reply('🐐🇫🇷 📸 Envía una imagen o video con el comando `.s`');
-            const media = await msg.downloadMedia();
-            const imageBuffer = Buffer.from(media.data, 'base64');
-            const stickerBuffer = await sharp(imageBuffer)
-                .resize(512, 512, { fit: 'inside' })
-                .webp()
-                .toBuffer();
-            const sticker = new MessageMedia('image/webp', stickerBuffer.toString('base64'));
-            return chat.sendMessage(sticker, { sendMediaAsSticker: true });
+            if (msg.hasMedia) {
+                const media = await msg.downloadMedia();
+                const ext = media.mimetype.split('/')[1];
+                const tempDir = path.join(__dirname, 'temp');
+                if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+
+                const inputPath = path.join(tempDir, `input.${ext}`);
+                const outputPath = path.join(tempDir, `sticker.webp`);
+                fs.writeFileSync(inputPath, Buffer.from(media.data, 'base64'));
+
+                ffmpeg(inputPath)
+                    .outputOptions([
+                        '-vcodec libwebp',
+                        '-vf "scale=720:720:force_original_aspect_ratio=decrease,fps=30"',
+                        '-lossless 1',
+                        '-compression_level 6',
+                        '-qscale 75',
+                        '-loop 0',
+                        '-preset default'
+                    ])
+                    .toFormat('webp')
+                    .save(outputPath)
+                    .on('end', async () => {
+                        const sticker = MessageMedia.fromFilePath(outputPath);
+                        await chat.sendMessage(sticker, {
+                            sendMediaAsSticker: true,
+                            stickerName: 'ChivaBot',
+                            stickerAuthor: '🐐🇫🇷'
+                        });
+                        fs.unlinkSync(inputPath);
+                        fs.unlinkSync(outputPath);
+                    })
+                    .on('error', err => {
+                        console.error(`${prefix} ❌ Error creando sticker:`, err);
+                        msg.reply(`${prefix} ❌ Error creando sticker: ${err.message}`);
+                    });
+
+            } else {
+                msg.reply(`${prefix} 📸 Envía una imagen, video o GIF con el comando .s para convertirlo en sticker gigante y animado.`);
+            }
         }
 
-        // ---------- YouTube Audio Optimizado ----------
-        if (text.startsWith('.yt')) {
-            const query = text.replace('.yt', '').trim();
-            if (!query) return msg.reply('🐐🇫🇷 🎵 Escribe el nombre de la canción o artista.\nEjemplo: `.yt Shakira Hips Don’t Lie`');
-
-            msg.reply(`🐐🇫🇷 🔍 Buscando "${query}" en YouTube...`);
-            const searchResult = await ytSearch(query);
-            if (!searchResult || !searchResult.videos.length) return msg.reply('🐐🇫🇷 ❌ No encontré resultados 😢');
-
-            const url = searchResult.videos[0].url;
-            const info = await ytdl.getInfo(url);
-
-            msg.reply(`🐐🇫🇷 🎧 Descargando "${info.videoDetails.title}"...`);
-
-            // Creamos un buffer stream con ffmpeg para mp3
-            const passThrough = new stream.PassThrough();
-            ffmpeg(ytdl(url, { filter: 'audioonly' }))
-                .audioBitrate(128)
-                .format('mp3')
-                .pipe(passThrough);
-
-            const chunks = [];
-            passThrough.on('data', chunk => chunks.push(chunk));
-            passThrough.on('end', async () => {
-                const buffer = Buffer.concat(chunks);
-                const media = new MessageMedia('audio/mpeg', buffer.toString('base64'), `${info.videoDetails.title}.mp3`);
-                await chat.sendMessage(media, { caption: `🐐🇫🇷 🎶 ${info.videoDetails.title}` });
-            });
-            passThrough.on('error', err => {
-                console.error('🐐🇫🇷 ⚠️ Error descargando audio:', err);
-                msg.reply('🐐🇫🇷 ⚠️ Ocurrió un error al descargar el audio.');
-            });
+        // --------- Abrir grupo ---------
+        if (text.startsWith('.abrir')) {
+            if (chat.isGroup) {
+                await chat.setMessagesAdminsOnly(false);
+                msg.reply(`${prefix} ✅ El grupo ha sido abierto para todos los participantes.`);
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
+            }
         }
 
-        // ---------- Juego de mesa ----------
-        if (text.startsWith('.mesa4') || text.startsWith('.mesa6')) {
-            const [command, ...textParts] = text.split(' ');
-            const extraText = textParts.join(' ');
-            const players = command === '.mesa4' ? 4 : 6;
-            const mentions = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
-            const mentionText = mentions.map(p => `@${p.id.user}`).join(' ');
-            return chat.sendMessage(`🐐🇫🇷 🎲 Mesa de ${players}: ${mentionText}\n${extraText}`, { mentions });
+        // --------- Cerrar grupo ---------
+        if (text.startsWith('.cerrar')) {
+            if (chat.isGroup) {
+                await chat.setMessagesAdminsOnly(true);
+                msg.reply(`${prefix} ✅ El grupo ha sido cerrado solo para administradores.`);
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
+            }
         }
 
-        // ---------- Menú ----------
-        if (text === '.boy') {
-            return chat.sendMessage(
-`🐐🇫🇷 📜 *Menú de comandos*:
-.ping - Revisar si el bot está activo
-.todos / .hidetag / .notify - Mencionar a todos en el grupo
-.s - Convertir imagen/video en sticker
-.yt [nombre canción] - Descargar audio de YouTube
-.mesa4 / .mesa6 [texto] - Juego de mesa
-.cerrar - Cerrar grupo (solo admins)
-.abrir - Abrir grupo (solo admins)
-
-Ejemplo: .yt Shakira Hips Don’t Lie`
-            );
+        // --------- Menu de comandos ---------
+        if (text.startsWith('.boy')) {
+            msg.reply(`${prefix} 🤖 *Comandos de ChivaBot*:
+            
+.s + media → Sticker gigante/animado
+.cerrar → Cerrar grupo solo admin
+.abrir → Abrir grupo para todos
+.boy → Mostrar este menú
+            
+Ejemplo: envía una imagen y responde con .s para convertirla en sticker gigante.`);
         }
 
-        // ---------- Cerrar/Abrir grupo ----------
-        if (isGroup && (text === '.cerrar' || text === '.abrir')) {
-            if (!chat.isGroup) return msg.reply('🐐🇫🇷 ❌ Este comando solo funciona en grupos');
-            const sender = chat.participants.find(p => p.id._serialized === msg.author || p.id._serialized === msg.from);
-            if (!sender?.isAdmin) return msg.reply('🐐🇫🇷 ❌ Solo administradores pueden usar este comando');
-            await chat.setMessagesAdminsOnly(text === '.cerrar');
-            return msg.reply(`🐐🇫🇷 ✅ Grupo ${text === '.cerrar' ? 'cerrado' : 'abierto'} para mensajes`);
-        }
-
-    } catch (err) {
-        console.error('🐐🇫🇷 ❌ Ocurrió un error interno:', err);
-        msg.reply(`🐐🇫🇷 ❌ Ocurrió un error interno: ${err.message}`);
+    } catch (error) {
+        console.error(`${prefix} ⚠️ Error al procesar mensaje:`, error);
+        msg.reply(`${prefix} ⚠️ Ocurrió un error: ${error.message}`);
     }
 });
+
+// ====================== Cliente ======================
+client.initialize();

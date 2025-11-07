@@ -1,116 +1,170 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
-const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
+const path = require('path');
 
-ffmpeg.setFfmpegPath(ffmpegPath);
-
-const prefix = '🐐🇫🇷';
+const prefix = "🐐🇫🇷";
 
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "chivabot" }),
+    authStrategy: new LocalAuth(),
     puppeteer: { headless: true }
 });
 
-// ====================== Inicio ======================
+// ------------------ QR ------------------
 client.on('qr', qr => {
     qrcode.generate(qr, { small: true });
-    console.log(`${prefix} 📸 Escanea este QR con WhatsApp Web`);
+    console.log(`${prefix} ⚠️ Escanea el QR para iniciar sesión`);
 });
 
+// ------------------ READY ------------------
 client.on('ready', () => {
     console.log(`${prefix} 🎉 Ya estoy listo para usarse, arriba las Chivas prrs!`);
 });
 
-// ====================== Comandos ======================
+// ------------------ MESSAGE ------------------
 client.on('message', async msg => {
     const chat = await msg.getChat();
-    const text = msg.body || '';
-    
+    const text = msg.body;
+
     try {
-        // --------- Sticker gigante y animado ---------
-        if (text.startsWith('.s')) {
-            if (msg.hasMedia) {
-                const media = await msg.downloadMedia();
-                const ext = media.mimetype.split('/')[1];
-                const tempDir = path.join(__dirname, 'temp');
-                if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+        // ------------------ STICKER ------------------
+        if (text.startsWith('.s') && msg.hasMedia) {
+            const media = await msg.downloadMedia();
+            const ext = media.mimetype.split('/')[1];
+            const inputPath = `temp.${ext}`;
+            const outputPath = `sticker.webp`;
 
-                const inputPath = path.join(tempDir, `input.${ext}`);
-                const outputPath = path.join(tempDir, `sticker.webp`);
-                fs.writeFileSync(inputPath, Buffer.from(media.data, 'base64'));
+            fs.writeFileSync(inputPath, media.data, 'base64');
 
-                ffmpeg(inputPath)
-                    .outputOptions([
-                        '-vcodec libwebp',
-                        '-vf "scale=720:720:force_original_aspect_ratio=decrease,fps=30"',
-                        '-lossless 1',
-                        '-compression_level 6',
-                        '-qscale 75',
-                        '-loop 0',
-                        '-preset default'
-                    ])
-                    .toFormat('webp')
-                    .save(outputPath)
-                    .on('end', async () => {
-                        const sticker = MessageMedia.fromFilePath(outputPath);
-                        await chat.sendMessage(sticker, {
-                            sendMediaAsSticker: true,
-                            stickerName: 'ChivaBot',
-                            stickerAuthor: '🐐🇫🇷'
-                        });
-                        fs.unlinkSync(inputPath);
-                        fs.unlinkSync(outputPath);
-                    })
-                    .on('error', err => {
-                        console.error(`${prefix} ❌ Error creando sticker:`, err);
-                        msg.reply(`${prefix} ❌ Error creando sticker: ${err.message}`);
-                    });
-
-            } else {
-                msg.reply(`${prefix} 📸 Envía una imagen, video o GIF con el comando .s para convertirlo en sticker gigante y animado.`);
-            }
+            ffmpeg(inputPath)
+                .inputFormat(ext)
+                .outputOptions([
+                    '-vcodec libwebp',
+                    '-lossless 1',
+                    '-compression_level 6',
+                    '-qscale 75',
+                    '-loop 0',
+                    '-preset default',
+                    '-an',
+                    '-t 10',
+                    '-vf scale=\'min(720,iw)\':\'min(720,ih)\':force_original_aspect_ratio=decrease,fps=15,format=rgba'
+                ])
+                .toFormat('webp')
+                .save(outputPath)
+                .on('end', async () => {
+                    const stickerData = fs.readFileSync(outputPath, { encoding: 'base64' });
+                    await msg.reply(new MessageMedia('image/webp', stickerData));
+                    fs.unlinkSync(inputPath);
+                    fs.unlinkSync(outputPath);
+                })
+                .on('error', err => {
+                    console.error(`${prefix} ❌ Error creando sticker:`, err);
+                    msg.reply(`${prefix} ❌ Error creando sticker: ${err.message}`);
+                });
         }
 
-        // --------- Abrir grupo ---------
-        if (text.startsWith('.abrir')) {
-            if (chat.isGroup) {
-                await chat.setMessagesAdminsOnly(false);
-                msg.reply(`${prefix} ✅ El grupo ha sido abierto para todos los participantes.`);
+        // ------------------ SALUDAR ------------------
+        else if (text.startsWith('.saludar')) {
+            msg.reply(`${prefix} 👋 Hola! Arriba las Chivas prrs!`);
+        }
+
+        // ------------------ INFO ------------------
+        else if (text.startsWith('.info')) {
+            if(chat.isGroup) {
+                msg.reply(`${prefix} 🏟️ Grupo: ${chat.name}\nParticipantes: ${chat.participants.length}`);
             } else {
                 msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
             }
         }
 
-        // --------- Cerrar grupo ---------
-        if (text.startsWith('.cerrar')) {
-            if (chat.isGroup) {
-                await chat.setMessagesAdminsOnly(true);
-                msg.reply(`${prefix} ✅ El grupo ha sido cerrado solo para administradores.`);
-            } else {
-                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
-            }
-        }
-
-        // --------- Menu de comandos ---------
-        if (text.startsWith('.boy')) {
+        // ------------------ BOT / BOY ------------------
+        else if (text.startsWith('.bot') || text.startsWith('.boy')) {
             msg.reply(`${prefix} 🤖 *Comandos de ChivaBot*:
-            
-.s + media → Sticker gigante/animado
+.s + media → Sticker grande/animado
 .cerrar → Cerrar grupo solo admin
 .abrir → Abrir grupo para todos
-.boy → Mostrar este menú
-            
-Ejemplo: envía una imagen y responde con .s para convertirla en sticker gigante.`);
+.todos → Etiquetar a todos
+.notify <mensaje> → Notificar a todos
+.hidetag <mensaje> → Mensaje ocultando nombres
+.saludar → Saludar al bot
+.info → Info del grupo
+.mesa4 / .mesa6 <mensaje> → Juego de mesa con 4 o 6 jugadores
+.bot / .boy → Mostrar este menú`);
         }
 
-    } catch (error) {
-        console.error(`${prefix} ⚠️ Error al procesar mensaje:`, error);
-        msg.reply(`${prefix} ⚠️ Ocurrió un error: ${error.message}`);
+        // ------------------ CERRAR GRUPO ------------------
+        else if (text.startsWith('.cerrar')) {
+            if(chat.isGroup && chat.participants.find(p => p.id._serialized === msg.author || msg.from === p.id._serialized)?.isAdmin) {
+                await chat.setMessagesAdminsOnly(true);
+                msg.reply(`${prefix} 🔒 Grupo cerrado para solo admins.`);
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo puede usarlo un admin.`);
+            }
+        }
+
+        // ------------------ ABRIR GRUPO ------------------
+        else if (text.startsWith('.abrir')) {
+            if(chat.isGroup && chat.participants.find(p => p.id._serialized === msg.author || msg.from === p.id._serialized)?.isAdmin) {
+                await chat.setMessagesAdminsOnly(false);
+                msg.reply(`${prefix} 🔓 Grupo abierto para todos.`);
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo puede usarlo un admin.`);
+            }
+        }
+
+        // ------------------ TODOS ------------------
+        else if (text.startsWith('.todos')) {
+            if(chat.isGroup) {
+                const mentions = chat.participants.map(p => p.id);
+                const messageText = mentions.map(id => `@${id.user}`).join(' ');
+                chat.sendMessage(`${prefix} 📢 Todos: ${messageText}`, { mentions: mentions.map(id => ({ id: id })) });
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
+            }
+        }
+
+        // ------------------ NOTIFY ------------------
+        else if (text.startsWith('.notify')) {
+            if(chat.isGroup) {
+                const mensaje = text.replace('.notify', '').trim();
+                const mentions = chat.participants.map(p => p.id);
+                chat.sendMessage(`${prefix} 📣 ${mensaje}`, { mentions: mentions.map(id => ({ id: id })) });
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
+            }
+        }
+
+        // ------------------ HIDETAG ------------------
+        else if (text.startsWith('.hidetag')) {
+            if(chat.isGroup) {
+                const mensaje = text.replace('.hidetag', '').trim();
+                const mentions = chat.participants.map(p => p.id);
+                chat.sendMessage(`${mensaje}`, { mentions: mentions.map(id => ({ id: id })) });
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
+            }
+        }
+
+        // ------------------ JUEGO DE MESA ------------------
+        else if (text.startsWith('.mesa4') || text.startsWith('.mesa6')) {
+            if(chat.isGroup) {
+                const [command, ...textParts] = text.split(' ');
+                const mesaText = textParts.join(' ');
+                const players = command === '.mesa4' ? 4 : 6;
+                const mentions = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
+                const mentionText = mentions.map(p => `@${p.id.user}`).join(' ');
+                chat.sendMessage(`${prefix} 🎲 Mesa de ${players} jugadores: ${mentionText}\n${mesaText}`, { mentions });
+            } else {
+                msg.reply(`${prefix} ❌ Este comando solo funciona en grupos.`);
+            }
+        }
+
+    } catch (err) {
+        console.error(`${prefix} ⚠️ Error al procesar mensaje:`, err);
+        msg.reply(`${prefix} ❌ Ocurrió un error interno: ${err.message}`);
     }
 });
 
-// ====================== Cliente ======================
+// ------------------ INIT ------------------
 client.initialize();

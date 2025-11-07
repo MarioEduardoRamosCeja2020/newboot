@@ -4,3 +4,5 @@ temp/
 .wwebjs_auth/
 .wwebjs_cache/
 .env
+# Sesión de WhatsApp
+.wwebjs_auth/

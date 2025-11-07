@@ -1,7 +1,7 @@
 {
-  "name": "botwhatsapp",
+  "name": "chivas-bot-hps",
   "version": "1.0.0",
-  "description": "Bot de WhatsApp desplegable en Render",
+  "description": "🤖 Bot de WhatsApp con búsqueda de YouTube y stickers",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,13 +9,18 @@
   },
   "dependencies": {
     "express": "^4.21.1",
-    "fluent-ffmpeg": "^2.1.2",
     "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "path": "^0.12.7",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.26.0",
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
+    "yt-search": "^2.10.4",
     "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

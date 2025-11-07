@@ -1,116 +1,97 @@
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const express = require('express');
-const ffmpeg = require('fluent-ffmpeg');
-const fs = require('fs');
-const path = require('path');
+import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
+import qrcode from 'qrcode-terminal';
 
+// Render asigna puerto automáticamente
+const PORT = process.env.PORT || 10000;
+
+// Usamos LocalAuth para guardar la sesión en /root/.wwebjs_auth (Render)
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "bot" }),
+    authStrategy: new LocalAuth({ clientId: 'bot' }),
     puppeteer: { headless: true }
 });
 
+// QR code para la primera conexión
 client.on('qr', qr => {
-    console.log('🐐🇫🇷 ⚠️ Escanea el QR para iniciar sesión');
     qrcode.generate(qr, { small: true });
+    console.log('🐐🇫🇷 ⚠️ Escanea este QR para iniciar sesión');
 });
 
+// Evento ready: sesión guardada y bot activo
 client.on('ready', async () => {
-    console.log('🐐🇫🇷 🎉 Ya estoy listo para usarse, arriba las Chivas prrs!');
+    console.log(`🐐🇫🇷 🎉 Bot activo en Render en puerto ${PORT}!`);
 
-    // Aviso a un grupo si quieres
+    // Avisar a todos los grupos que el bot está listo
     const chats = await client.getChats();
-    const grupo = chats.find(c => c.isGroup);
-    if(grupo) {
-        grupo.sendMessage('🐐🇫🇷 🎉 ¡El bot está activo! Usa .bot para ver los comandos.');
+    const groups = chats.filter(c => c.isGroup);
+    for (const group of groups) {
+        await group.sendMessage('🐐🇫🇷 🎉 ¡Bot activo y listo para usarse! Usa .bot para ver el menú de comandos.');
     }
 });
 
+// Manejo de mensajes y comandos
 client.on('message', async msg => {
     const chat = await msg.getChat();
+    const args = msg.body.split(' ');
+    const command = args[0].toLowerCase();
+    const text = args.slice(1).join(' ');
 
-    // --------- MENÚ BOT ---------
-    if(msg.body === '.bot') {
-        let menu = `🐐🇫🇷 *Menú de comandos*\n\n`;
-        menu += `.todos - Etiquetar a todos\n`;
-        menu += `.notify <texto> - Notificar a todos\n`;
-        menu += `.hidetag <texto> - Mensaje oculto etiquetando a todos\n`;
-        menu += `.mesa4 <texto> - Crear mesa de 4\n`;
-        menu += `.mesa6 <texto> - Crear mesa de 6\n`;
-        menu += `.sticker - Crear sticker de imagen, video o GIF\n`;
-        chat.sendMessage(menu);
-    }
-
-    // --------- ETIQUETAS ---------
-    if(msg.body.startsWith('.todos')) {
-        if(!chat.isGroup) return;
-        const mentionObjects = chat.participants.map(p => p.id);
-        const mentionText = mentionObjects.map(u => `@${u.user}`).join(' ');
-        chat.sendMessage(mentionText, { mentions: mentionObjects });
-    }
-
-    if(msg.body.startsWith('.notify')) {
-        if(!chat.isGroup) return;
-        const text = msg.body.slice(8).trim();
-        const mentionObjects = chat.participants.map(p => p.id);
-        chat.sendMessage(text, { mentions: mentionObjects });
-    }
-
-    if(msg.body.startsWith('.hidetag')) {
-        if(!chat.isGroup) return;
-        const text = msg.body.slice(8).trim();
-        const mentionObjects = chat.participants.map(p => p.id);
-        chat.sendMessage(text, { mentions: mentionObjects, sendSeen: false });
-    }
-
-    // --------- JUEGO DE MESA ---------
-    if (msg.body.startsWith('.mesa4') || msg.body.startsWith('.mesa6')) {
-        if(!chat.isGroup) return;
-        const [command, ...textParts] = msg.body.split(' ');
-        const text = textParts.join(' ');
-        const players = command === '.mesa4' ? 4 : 6;
-        const mentions = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
-        const mentionText = mentions.map(p => `@${p.id.user}`).join(' ');
-        chat.sendMessage(`Mesa de ${players}: ${mentionText}\n${text}`, { mentions });
-    }
-
-    // --------- STICKER AVANZADO ---------
-    if(msg.body.startsWith('.sticker') && msg.hasMedia) {
-        const media = await msg.downloadMedia();
-        const buffer = Buffer.from(media.data, 'base64');
-        const tempFile = path.join(__dirname, `temp_${Date.now()}.${media.mimetype.split('/')[1]}`);
-
-        fs.writeFileSync(tempFile, buffer);
-
-        if(media.mimetype.startsWith('video') || media.mimetype === 'image/gif') {
-            const output = tempFile.replace(/\.\w+$/, '.webp');
-            ffmpeg(tempFile)
-                .outputOptions(['-vcodec', 'libwebp', '-vf', 'scale=512:512:force_original_aspect_ratio=decrease,fps=15'])
-                .save(output)
-                .on('end', async () => {
-                    const sticker = MessageMedia.fromFilePath(output);
-                    await chat.sendMessage(sticker, { sendMediaAsSticker: true });
-                    fs.unlinkSync(tempFile);
-                    fs.unlinkSync(output);
-                })
-                .on('error', (err) => {
-                    console.error(err);
-                    chat.sendMessage('❌ Error creando sticker');
-                    fs.unlinkSync(tempFile);
-                });
-        } else { // imagen normal
-            const sticker = new MessageMedia(media.mimetype, media.data, media.filename);
-            await chat.sendMessage(sticker, { sendMediaAsSticker: true });
-            fs.unlinkSync(tempFile);
+    try {
+        // ---- Menú de comandos ----
+        if(command === '.bot'){
+            let menu = `🐐🇫🇷 *Menú de comandos*\n\n`;
+            menu += `.bot - Mostrar este menú\n`;
+            menu += `.todos - Etiquetar a todos\n`;
+            menu += `.hidetag <mensaje> - Mensaje ocultando menciones\n`;
+            menu += `.notify <mensaje> - Notificar a todos\n`;
+            menu += `.mesa4/.mesa6 <mensaje> - Crear mesa de 4 o 6 jugadores\n`;
+            menu += `.sticker <imagen/video> - Crear sticker\n`;
+            await chat.sendMessage(menu);
         }
+
+        // ---- Etiquetar a todos ----
+        if(command === '.todos' && chat.isGroup){
+            const mentions = chat.participants.map(p => p.id._serialized);
+            const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+            await chat.sendMessage(`${mentionText} ${text}`, { mentions });
+        }
+
+        // ---- Hidetag ----
+        if(command === '.hidetag' && chat.isGroup){
+            const mentions = chat.participants.map(p => p.id._serialized);
+            await chat.sendMessage(text, { mentions });
+        }
+
+        // ---- Notify ----
+        if(command === '.notify' && chat.isGroup){
+            const mentions = chat.participants.map(p => p.id._serialized);
+            const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+            await chat.sendMessage(`${mentionText} ${text}`, { mentions });
+        }
+
+        // ---- Juego de mesa ----
+        if((command === '.mesa4' || command === '.mesa6') && chat.isGroup){
+            const players = command === '.mesa4' ? 4 : 6;
+            const shuffled = chat.participants.sort(() => 0.5 - Math.random()).slice(0, players);
+            const mentions = shuffled.map(p => p.id._serialized);
+            const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+            await chat.sendMessage(`Mesa de ${players}: ${mentionText}\n${text}`, { mentions });
+        }
+
+        // ---- Sticker ----
+        if(command === '.sticker'){
+            if(msg.hasMedia){
+                const media = await msg.downloadMedia();
+                await chat.sendMessage(media, { sendMediaAsSticker: true });
+            } else {
+                await chat.sendMessage('❌ Envía una imagen o video para crear sticker.');
+            }
+        }
+
+    } catch (err) {
+        console.error('Error procesando mensaje:', err);
+        await chat.sendMessage('⚠️ Ocurrió un error, revisa el comando e intenta de nuevo.');
     }
 });
 
+// Inicializar bot
 client.initialize();
-
-// --------- SERVIDOR EXPRESS ---------
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-app.get('/', (req, res) => res.send('Servidor activo!'));
-app.listen(PORT, () => console.log(`Servidor activo en puerto ${PORT}`));

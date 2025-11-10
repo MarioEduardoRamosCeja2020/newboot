@@ -91,6 +91,7 @@ client.on('message', async msg => {
   if (!chat) return;
 
   try {
+     await chat.sendMessage('🚀 ¡Hola! El bot está listo y funcionando 😎🐐🇫🇷');
     // ---------------------------
     // Menú principal
     // ---------------------------
@@ -282,7 +283,13 @@ if (command === '.formarpareja' && chat.isGroup) {
     // ---------------------------
     // Comando desconocido
     // ---------------------------
-    await chat.sendMessage('😎🐐🇫🇷🤔 Comando no reconocido. Usa *.bot* para ver opciones.😎🐐🇫🇷');
+  if (raw.startsWith('.')) {
+  const command = raw.split(' ')[0]; // toma solo el comando sin argumentos
+  const comandosValidos = ['.todos', '.formarpareja', '.musica', '.sticker']; // lista de tus comandos
+  if (!comandosValidos.includes(command)) {
+    await chat.sendMessage(`😎🐐🇫🇷🤔 Comando "${command}" no reconocido. Usa *.bot* para ver opciones.😎🐐🇫🇷`);
+  }
+}
 
   } catch (err) {
     console.error('💥 Error general:', err);

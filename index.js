@@ -1,8 +1,16 @@
+// index.js
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import os from 'os';
+import express from 'express';
+import ytdl from 'ytdl-core';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegPath from 'ffmpeg-static';
+
+// Configurar ffmpeg
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 // ---------------------------
 // Cache en memoria
@@ -29,7 +37,6 @@ async function setPareja(chatId, user1, user2) {
   if (!existing) cache.parejas.push({ chat_id, user1, user2 });
   else Object.assign(existing, { user1, user2 });
 }
-
 function isValidUserId(id) {
   return typeof id === 'string' && id.includes('@');
 }
@@ -57,7 +64,7 @@ const sessionData = loadSession();
 // ---------------------------
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'bot', dataPath: './session_data' }),
-  puppeteer: { headless: true, args: ['--no‑sandbox', '--disable‑setuid‑sandbox', '--disable‑dev-shm‑usage'] },
+  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] },
   session: sessionData,
 });
 
@@ -65,28 +72,28 @@ const client = new Client({
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
 
 client.on('ready', async () => {
-  console.log('🐐🇫🇷 Bot listo');
+  console.log('😎🐐🇫🇷 Bot listo y conectado 😎🐐🇫🇷');
   client.on('authenticated', saveSession);
 
   const chats = await client.getChats();
   const groups = chats.filter(c => c.isGroup);
   for (const group of groups) {
     try {
-      await group.sendMessage('🐐🇫🇷 🎉 ¡Bot activo! Usa .bot para comandos.');
+      await group.sendMessage('😎🐐🇫🇷 🎉 ¡Bot activo! Usa *.bot* para ver los comandos disponibles 😎🐐🇫🇷');
     } catch (err) {
-      console.error('Error al enviar mensaje de inicio:', err);
+      console.error('💥 Error al enviar mensaje de inicio:', err);
     }
   }
 });
 
+// ---------------------------
 // Monitor de recursos
+// ---------------------------
 setInterval(() => {
   const mem = process.memoryUsage();
   const heapUsedMB = (mem.heapUsed / 1024 / 1024).toFixed(2);
-  const heapTotalMB = (mem.heapTotal / 1024 / 1024).toFixed(2);
   const rssMB = (mem.rss / 1024 / 1024).toFixed(2);
-  const load = os.loadavg()[0].toFixed(2);
-  console.log(`🖥️ Mem: heapUsed ${heapUsedMB} MB, heapTotal ${heapTotalMB} MB, rss ${rssMB} MB, load ${load}`);
+  console.log(`😎🐐🇫🇷 🖥️ Memoria usada: ${heapUsedMB} MB | RSS: ${rssMB} MB 😎🐐🇫🇷`);
 }, 60 * 1000);
 
 // ---------------------------
@@ -102,56 +109,63 @@ client.on('message', async msg => {
   const text = args.slice(1).join(' ').trim();
 
   try {
-    // Menú
+    // Menú principal
     if (command === '.bot') {
-      let menu = `🎉 *Menú de comandos*\n\n`;
-      menu += `.bot - Mostrar este menú\n`;
-      menu += `.todos - Etiquetar a todos\n`;
-      menu += `.hidetag <mensaje> - Enviar mensaje ocultando menciones\n`;
-      menu += `.notify <mensaje> - Notificar a todos\n`;
-      menu += `.mesa4/.mesa6 <tema> - Crear mesa de 4 o 6\n`;
-      menu += `.formarpareja - Formar pareja al azar\n`;
-      menu += `.cancion <nombre> - <artista> - Descargar MP3\n`;
-      await chat.sendMessage('🐐🇫🇷 ' + menu);
+      const menu = `
+😎🐐🇫🇷
+🎉 *MENÚ DE COMANDOS DEL BOT* 🎉
+
+💬 *.bot* — Mostrar este menú  
+👥 *.todos* — Etiquetar a todos los miembros  
+🙈 *.hidetag <mensaje>* — Enviar mensaje ocultando menciones  
+📣 *.notify <mensaje>* — Notificar a todos  
+🎲 *.mesa4 / .mesa6 <tema>* — Crear una mesa de 4 o 6 jugadores  
+❤️ *.formarpareja* — Formar una pareja aleatoria  
+🎵 *.cancion <nombre> - <artista>* — Descargar canción en MP3  
+
+🐐 *¡El bot más chivo está activo!* 🐐
+😎🐐🇫🇷
+`;
+      await chat.sendMessage(menu);
       return;
     }
 
     // Etiquetar todos
     if (command === '.todos' && chat.isGroup) {
       const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join('\n');
-      await chat.sendMessage('🐐🇫🇷 *¡Atención!* 📣\n' + mentionText, { mentions });
+      const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+      await chat.sendMessage(`😎🐐🇫🇷 📣 *¡Atención equipo!* 📣\n${mentionText}\n😎🐐🇫🇷`, { mentions });
       return;
     }
 
     // Hidetag
     if (command === '.hidetag' && chat.isGroup) {
       if (!text) {
-        await chat.sendMessage('🐐🇫🇷 ⚠️ Indica el mensaje tras .hidetag');
+        await chat.sendMessage('😎🐐🇫🇷 ⚠️ Debes escribir un mensaje tras *.hidetag* 😎🐐🇫🇷');
         return;
       }
       const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      await chat.sendMessage('🐐🇫🇷 ' + text, { mentions });
+      await chat.sendMessage(`😎🐐🇫🇷 ${text} 😎🐐🇫🇷`, { mentions });
       return;
     }
 
     // Notify
     if (command === '.notify' && chat.isGroup) {
       if (!text) {
-        await chat.sendMessage('🐐🇫🇷 ⚠️ Indica el mensaje tras .notify');
+        await chat.sendMessage('😎🐐🇫🇷 ⚠️ Escribe un mensaje después de *.notify* 😎🐐🇫🇷');
         return;
       }
       const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join('\n');
-      await chat.sendMessage('🐐🇫🇷 📣 Notificación a todos:\n' + mentionText + '\n\n' + text, { mentions });
+      const mentionText = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+      await chat.sendMessage(`😎🐐🇫🇷 📢 *Notificación para todos:* 📢\n\n${text}\n\n${mentionText}\n😎🐐🇫🇷`, { mentions });
       return;
     }
 
-    // Crear mesas
+    // Crear mesa
     if ((command === '.mesa4' || command === '.mesa6') && chat.isGroup) {
-      const maxPlayers = (command === '.mesa4') ? 4 : 6;
-      await setMesa(chat.id._serialized, [], maxPlayers, text || '[sin tema]');
-      await chat.sendMessage('🐐🇫🇷 🎲 Mesa para *' + maxPlayers + ' jugadores* iniciada.\nTema: _' + (text || '[sin tema]') + '_\nEscribe "yo" para inscribirte.');
+      const maxPlayers = command === '.mesa4' ? 4 : 6;
+      await setMesa(chat.id._serialized, [], maxPlayers, text || '[Sin tema]');
+      await chat.sendMessage(`😎🐐🇫🇷 🎲 Se ha creado una *mesa para ${maxPlayers} jugadores*\n🧩 Tema: _${text || '[Sin tema]'}_\n✋ Escribe *yo* para unirte 😎🐐🇫🇷`);
       return;
     }
 
@@ -159,21 +173,22 @@ client.on('message', async msg => {
     if (raw.toLowerCase() === 'yo' && chat.isGroup) {
       const mesa = await getMesa(chat.id._serialized);
       if (!mesa) return;
+
       const userId = msg.author || msg.from;
       if (!isValidUserId(userId)) return;
 
       if (!mesa.jugadores.includes(userId)) {
         mesa.jugadores.push(userId);
         await setMesa(chat.id._serialized, mesa.jugadores, mesa.max, mesa.tema);
-        await chat.sendMessage('🐐🇫🇷 @' + userId.split('@')[0] + ' se inscribió (' + mesa.jugadores.length + '/' + mesa.max + ')', { mentions: [userId] });
+        await chat.sendMessage(`😎🐐🇫🇷 🙋‍♂️ @${userId.split('@')[0]} se ha unido a la mesa (${mesa.jugadores.length}/${mesa.max}) 😎🐐🇫🇷`, { mentions: [userId] });
       } else {
-        await chat.sendMessage('🐐🇫🇷 @' + userId.split('@')[0] + ', ya estás inscrito.', { mentions: [userId] });
+        await chat.sendMessage(`😎🐐🇫🇷 ⚠️ @${userId.split('@')[0]}, ya estás inscrito 😎🐐🇫🇷`, { mentions: [userId] });
       }
 
       if (mesa.jugadores.length === mesa.max) {
         const selected = mesa.jugadores[Math.floor(Math.random() * mesa.jugadores.length)];
         const mentionText = mesa.jugadores.map(u => `@${u.split('@')[0]}`).join(' ');
-        await chat.sendMessage('🐐🇫🇷 ✅ Mesa completa:\n' + mentionText + '\nTema: _' + mesa.tema + '_\n@' + selected.split('@')[0] + ', te toca poner mesa!', { mentions: mesa.jugadores.concat([selected]) });
+        await chat.sendMessage(`😎🐐🇫🇷 ✅ *Mesa completa* ✅\n${mentionText}\n🧩 Tema: _${mesa.tema}_\n🎯 @${selected.split('@')[0]}, ¡te toca poner mesa! 😎🐐🇫🇷`, { mentions: mesa.jugadores.concat([selected]) });
       }
       return;
     }
@@ -181,57 +196,70 @@ client.on('message', async msg => {
     // Formar pareja
     if (command === '.formarpareja' && chat.isGroup) {
       const participantes = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
+      if (participantes.length < 2) {
+        await chat.sendMessage('😎🐐🇫🇷 ⚠️ No hay suficientes participantes para formar pareja 😎🐐🇫🇷');
+        return;
+      }
       const shuffled = participantes.sort(() => Math.random() - 0.5);
       const pareja1 = shuffled[0];
       const pareja2 = shuffled[1];
       await setPareja(chat.id._serialized, pareja1, pareja2);
-      await chat.sendMessage('🐐🇫🇷 💑 Pareja formada:\n@' + pareja1.split('@')[0] + ' y @' + pareja2.split('@')[0], { mentions: [pareja1, pareja2] });
+      await chat.sendMessage(`😎🐐🇫🇷 💞 *Pareja formada:* 💞\n@${pareja1.split('@')[0]} ❤️ @${pareja2.split('@')[0]} 😎🐐🇫🇷`, { mentions: [pareja1, pareja2] });
       return;
     }
 
-    // Descargar canción (placeholder)
+    // Descargar canción
     if (command === '.cancion') {
       if (!text.includes('-')) {
-        await chat.sendMessage('🐐🇫🇷 ⚠️ Usa: .cancion <nombre> - <artista>');
+        await chat.sendMessage('😎🐐🇫🇷 ⚠️ Usa: *.cancion <nombre> - <artista>* 😎🐐🇫🇷');
         return;
       }
+
       const [nombre, artista] = text.split('-').map(s => s.trim());
-      await chat.sendMessage('🐐🇫🇷 🎵 Descargando ' + nombre + ' de ' + artista + '...');
+      const searchQuery = `${nombre} ${artista}`;
+      await chat.sendMessage(`😎🐐🇫🇷 🎵 Buscando y descargando: *${nombre} - ${artista}* 😎🐐🇫🇷`);
+
+      try {
+        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
+        const html = await fetch(url).then(res => res.text());
+        const videoId = html.match(/"videoId":"(.*?)"/)?.[1];
+        if (!videoId) throw new Error('No se encontró video');
+
+        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        const outputPath = `./temp_${Date.now()}.mp3`;
+
+        await new Promise((resolve, reject) => {
+          ffmpeg(ytdl(videoUrl, { filter: 'audioonly' }))
+            .audioBitrate(128)
+            .save(outputPath)
+            .on('end', resolve)
+            .on('error', reject);
+        });
+
+        const media = MessageMedia.fromFilePath(outputPath);
+        await chat.sendMessage(media, { caption: `😎🐐🇫🇷 🎶 *${nombre} - ${artista}* 😎🐐🇫🇷` });
+        fs.unlinkSync(outputPath);
+      } catch (err) {
+        console.error('💥 Error al descargar canción:', err);
+        await chat.sendMessage('😎🐐🇫🇷 ⚠️ No pude descargar la canción, intenta con otro nombre 😎🐐🇫🇷');
+      }
       return;
     }
 
     // Comando desconocido
-    await chat.sendMessage('🐐🇫🇷 Comando no reconocido. Usa .bot para ver los comandos.');
+    await chat.sendMessage('😎🐐🇫🇷 🤔 Comando no reconocido. Usa *.bot* para ver la lista completa 😎🐐🇫🇷');
   } catch (err) {
     console.error('💥 Error en comando:', err);
-    await chat.sendMessage('🐐🇫🇷 ⚠️ Ocurrió un error, inténtalo de nuevo.');
+    await chat.sendMessage('😎🐐🇫🇷 ⚠️ Ocurrió un error, inténtalo de nuevo 😎🐐🇫🇷');
   }
 });
 
 client.initialize();
 
 // ---------------------------
-// Manejo de errores globales
+// Servidor Express
 // ---------------------------
-process.on('uncaughtException', (err) => {
-  console.error('💥 Uncaught Exception:', err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 Unhandled Rejection en promesa:', promise, 'razón:', reason);
-});
-
-import express from 'express';
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Ruta de salud
-app.get('/', (req, res) => {
-  res.send('🐐🇫🇷 Bot activo y listo');
-});
-
-// Iniciar servidor HTTP
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🌐 Servidor de salud escuchando en puerto ${PORT}`);
-});
+app.get('/', (req, res) => res.send('😎🐐🇫🇷 Bot activo y en línea 😎🐐🇫🇷'));
+app.listen(PORT, '0.0.0.0', () => console.log(`🌐 Servidor corriendo en puerto ${PORT}`));

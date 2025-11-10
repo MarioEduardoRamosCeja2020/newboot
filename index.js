@@ -184,35 +184,47 @@ if (command === '.todos' && chat.isGroup) {
 // Comando: .formarpareja
 // ---------------------------
 if (command === '.formarpareja' && chat.isGroup) {
-  const participantes = chat.participants
-    .map(p => p.id._serialized)
-    .filter(isValidUserId);
+  try {
+    // Filtrar participantes válidos
+    const participantes = chat.participants
+      .map(p => p.id._serialized)
+      .filter(isValidUserId);
 
-  if (participantes.length < 2) {
-    return await chat.sendMessage('⚠️ No hay suficientes participantes para formar pareja.');
-  }
+    if (participantes.length < 2) {
+      await chat.sendMessage('⚠️ No hay suficientes participantes para formar pareja.');
+      return;
+    }
 
-  // Revisar si ya existe una pareja en este chat
-  const existingPair = cache.parejas.find(p => p.chat_id === chat.id._serialized);
-  if (existingPair) {
-    return await chat.sendMessage(
-      `💞 Ya existe una pareja formada: @${existingPair.user1.split('@')[0]} ❤️ @${existingPair.user2.split('@')[0]}`,
-      { mentions: [existingPair.user1, existingPair.user2] }
+    // Mezclar participantes y elegir pareja
+    const shuffled = participantes.sort(() => Math.random() - 0.5);
+    const [a, b] = shuffled;
+
+    // Guardar pareja en cache
+    await setPareja(chat.id._serialized, a, b);
+
+    // Frases aleatorias para la pareja
+    const mensajesPareja = [
+      '💞 ¡Juntos por siempre! 🌹',
+      '❤️ Amor eterno para esta parejita 💖',
+      '💌 Unidos hasta la próxima aventura',
+      '🌟 ¡La química es real! 💫',
+      '💕 Una mesada de amor y risas para ustedes',
+      '💘 Pareja sellada con risas y chocolate 🍫',
+      '✨ Que la fuerza del amor los acompañe siempre 💫'
+    ];
+    const mensaje = mensajesPareja[Math.floor(Math.random() * mensajesPareja.length)];
+
+    // Enviar mensaje al grupo
+    await chat.sendMessage(
+      `💞 Pareja formada: @${a.split('@')[0]} ❤️ @${b.split('@')[0]}\n${mensaje}`,
+      { mentions: [a, b] }
     );
+  } catch (err) {
+    console.error('💥 Error al formar pareja:', err);
+    await chat.sendMessage('⚠️ Ocurrió un error al formar la pareja, inténtalo de nuevo.');
   }
-
-  // Mezclar participantes y tomar los dos primeros
-  const shuffled = participantes.sort(() => Math.random() - 0.5);
-  const [user1, user2] = shuffled;
-
-  await setPareja(chat.id._serialized, user1, user2);
-
-  await chat.sendMessage(
-    `💞 Pareja formada: @${user1.split('@')[0]} ❤️ @${user2.split('@')[0]}`,
-    { mentions: [user1, user2] }
-  );
-  return;
 }
+
 
     // ---------------------------
     // Comando: .memes

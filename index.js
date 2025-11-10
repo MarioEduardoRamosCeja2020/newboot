@@ -1,4 +1,3 @@
-// index.js
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
@@ -58,7 +57,7 @@ const sessionData = loadSession();
 // ---------------------------
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'bot', dataPath: './session_data' }),
-  puppeteer: { headless: true, args: ['--no‑sandbox', '--disable‑setuid‑sandbox', '--disable‑dev‑shm‑usage'] },
+  puppeteer: { headless: true, args: ['--no‑sandbox', '--disable‑setuid‑sandbox', '--disable‑dev-shm‑usage'] },
   session: sessionData,
 });
 
@@ -74,7 +73,9 @@ client.on('ready', async () => {
   for (const group of groups) {
     try {
       await group.sendMessage('🐐🇫🇷 🎉 ¡Bot activo! Usa .bot para comandos.');
-    } catch {}
+    } catch (err) {
+      console.error('Error al enviar mensaje de inicio:', err);
+    }
   }
 });
 
@@ -85,7 +86,7 @@ setInterval(() => {
   const heapTotalMB = (mem.heapTotal / 1024 / 1024).toFixed(2);
   const rssMB = (mem.rss / 1024 / 1024).toFixed(2);
   const load = os.loadavg()[0].toFixed(2);
-  setImmediate(() => {});
+  console.log(`🖥️ Mem: heapUsed ${heapUsedMB} MB, heapTotal ${heapTotalMB} MB, rss ${rssMB} MB, load ${load}`);
 }, 60 * 1000);
 
 // ---------------------------
@@ -202,9 +203,35 @@ client.on('message', async msg => {
     // Comando desconocido
     await chat.sendMessage('🐐🇫🇷 Comando no reconocido. Usa .bot para ver los comandos.');
   } catch (err) {
-    console.error(err);
+    console.error('💥 Error en comando:', err);
     await chat.sendMessage('🐐🇫🇷 ⚠️ Ocurrió un error, inténtalo de nuevo.');
   }
 });
 
 client.initialize();
+
+// ---------------------------
+// Manejo de errores globales
+// ---------------------------
+process.on('uncaughtException', (err) => {
+  console.error('💥 Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection en promesa:', promise, 'razón:', reason);
+});
+
+import express from 'express';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Ruta de salud
+app.get('/', (req, res) => {
+  res.send('🐐🇫🇷 Bot activo y listo');
+});
+
+// Iniciar servidor HTTP
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🌐 Servidor de salud escuchando en puerto ${PORT}`);
+});

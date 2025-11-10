@@ -180,18 +180,39 @@ if (command === '.todos' && chat.isGroup) {
       return;
     }
 
-    // ---------------------------
-    // Comando: .formarpareja
-    // ---------------------------
-    if (command === '.formarpareja' && chat.isGroup) {
-      const participantes = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      if (participantes.length < 2) return await chat.sendMessage('⚠️ No hay suficientes participantes.');
-      const shuffled = participantes.sort(() => Math.random() - 0.5);
-      const [a, b] = shuffled;
-      await setPareja(chat.id._serialized, a, b);
-      await chat.sendMessage(`💞 Pareja formada: @${a.split('@')[0]} ❤️ @${b.split('@')[0]}`, { mentions: [a, b] });
-      return;
-    }
+// ---------------------------
+// Comando: .formarpareja
+// ---------------------------
+if (command === '.formarpareja' && chat.isGroup) {
+  const participantes = chat.participants
+    .map(p => p.id._serialized)
+    .filter(isValidUserId);
+
+  if (participantes.length < 2) {
+    return await chat.sendMessage('⚠️ No hay suficientes participantes para formar pareja.');
+  }
+
+  // Revisar si ya existe una pareja en este chat
+  const existingPair = cache.parejas.find(p => p.chat_id === chat.id._serialized);
+  if (existingPair) {
+    return await chat.sendMessage(
+      `💞 Ya existe una pareja formada: @${existingPair.user1.split('@')[0]} ❤️ @${existingPair.user2.split('@')[0]}`,
+      { mentions: [existingPair.user1, existingPair.user2] }
+    );
+  }
+
+  // Mezclar participantes y tomar los dos primeros
+  const shuffled = participantes.sort(() => Math.random() - 0.5);
+  const [user1, user2] = shuffled;
+
+  await setPareja(chat.id._serialized, user1, user2);
+
+  await chat.sendMessage(
+    `💞 Pareja formada: @${user1.split('@')[0]} ❤️ @${user2.split('@')[0]}`,
+    { mentions: [user1, user2] }
+  );
+  return;
+}
 
     // ---------------------------
     // Comando: .memes

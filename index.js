@@ -187,6 +187,53 @@ client.on('message', async msg => {
     }
 
     // ---------------------------
+// Comando: .memes
+// ---------------------------
+if (command === '.memes') {
+  await chat.sendMessage('🤣 Buscando un meme...');
+  const worker = new Worker('./workers/memeWorker.js');
+
+  worker.on('message', async (result) => {
+    if (result.error) {
+      await chat.sendMessage('⚠️ Error al obtener meme.');
+    } else {
+      const media = new MessageMedia('image/png', result.base64);
+      await chat.sendMessage(media);
+    }
+  });
+
+  return;
+}
+
+// ---------------------------
+// Comando: .imagenes
+// ---------------------------
+if (command === '.imagenes') {
+  if (!text) {
+    await chat.sendMessage('⚠️ Usa: *.imagenes <descripción>*');
+    return;
+  }
+
+  await chat.sendMessage(`🖼️ Generando imagen: *${text}* ...`);
+
+  const worker = new Worker('./workers/imageWorker.js', {
+    workerData: { prompt: text }
+  });
+
+  worker.on('message', async (result) => {
+    if (result.error) {
+      await chat.sendMessage('⚠️ Error al generar la imagen.');
+    } else {
+      const media = new MessageMedia('image/png', result.base64);
+      await chat.sendMessage(media);
+    }
+  });
+
+  return;
+}
+
+
+    // ---------------------------
     // Comando: .sticker (procesado en worker)
     // ---------------------------
     if (command === '.sticker' && msg.hasMedia) {

@@ -8,7 +8,7 @@ import sharp from 'sharp';
 
     const buffer = Buffer.from(mediaData.data, 'base64');
     const customText = text || 'Solo en Desterra2 Papu';
-    const fontSize = customText.length > 25 ? 28 : 36;
+    const fontSize = customText.length > 25 ? 48 : 64; // Más grande
 
     const processed = await sharp(buffer)
       .resize(512, 512, { fit: 'cover' })

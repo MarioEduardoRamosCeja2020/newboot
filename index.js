@@ -3,7 +3,8 @@ const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import express from 'express';
-import { Low, JSONFile } from 'lowdb';
+import lowdb from 'lowdb';   // Importación por defecto
+const { Low, JSONFile } = lowdb;  // Desestructurando para obtener Low y JSONFile
 import os from 'os';
 
 const SESSION_FILE_PATH = './session_data/session.json';

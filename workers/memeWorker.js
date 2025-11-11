@@ -1,20 +1,24 @@
+// workers/memeWorker.js
 import { parentPort } from 'worker_threads';
 import fetch from 'node-fetch';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 (async () => {
   try {
-    // Ejemplo simple usando API pública de memes
     const res = await fetch('https://meme-api.com/gimme');
     const data = await res.json();
+    const imageUrl = data.url;
 
-    if (!data || !data.url) throw new Error('No se pudo obtener meme');
+    const imageRes = await fetch(imageUrl);
+    const buffer = Buffer.from(await imageRes.arrayBuffer());
 
-    // Convertimos la imagen a base64
-    const imgRes = await fetch(data.url);
-    const buffer = await imgRes.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString('base64');
+    const tmpFile = path.join(os.tmpdir(), `meme-${Date.now()}.jpg`);
+    fs.writeFileSync(tmpFile, buffer);
 
-    parentPort.postMessage({ base64 });
+    const base64 = buffer.toString('base64');
+    parentPort.postMessage({ base64, tmpFile });
   } catch (err) {
     parentPort.postMessage({ error: err.message });
   }

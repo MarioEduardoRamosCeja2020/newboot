@@ -1,32 +1,23 @@
-import express from 'express';
-import OpenAI from 'openai';
+import { workerData, parentPort } from 'worker_threads';
+import fetch from 'node-fetch';
 
-const app = express();
-app.use(express.json());
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
-app.post('/pregunta', async (req, res) => {
-  const { pregunta } = req.body;
-  if (!pregunta) return res.status(400).json({ error: 'Falta la pregunta' });
-
+(async () => {
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      messages: [{ role: "user", content: pregunta }],
-      temperature: 0.7,
-      max_tokens: 500
-    });
+    const { prompt } = workerData;
+    if (!prompt) throw new Error('No se recibió descripción');
 
-    const respuesta = completion.choices[0].message.content;
-    res.json({ respuesta });
+    // Usamos una API pública de imágenes (rápida y sin bloqueo)
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
+    const res = await fetch(url);
+
+    if (!res.ok) throw new Error('No se pudo generar imagen');
+    const buffer = await res.arrayBuffer();
+
+    parentPort.postMessage({ base64: Buffer.from(buffer).toString('base64') });
   } catch (err) {
-    console.error("💥 Error IA:", err);
-    res.status(500).json({ error: "Ocurrió un error al generar la respuesta" });
+    console.error('🧠 Error en imageWorker:', err.message);
+    parentPort.postMessage({ error: err.message });
+  } finally {
+    process.exit(0);
   }
-});
-
-const PORT = 4000;
-app.listen(PORT, () => console.log(`🧠 Worker IA corriendo en puerto ${PORT}`));
+})();

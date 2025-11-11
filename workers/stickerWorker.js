@@ -1,31 +1,24 @@
-import { workerData, parentPort } from 'worker_threads';
+// workers/stickerWorker.js
+import { parentPort, workerData } from 'worker_threads';
+import fs from 'fs';
 import sharp from 'sharp';
+import path from 'path';
+import os from 'os';
 
 (async () => {
   try {
-    const { mediaData, text } = workerData;
-    if (!mediaData || !mediaData.data) throw new Error('No media');
+    const media = workerData.media;
+    const buffer = Buffer.from(media.data, 'base64');
+    const tmpFile = path.join(os.tmpdir(), `sticker-${Date.now()}.webp`);
 
-    const buffer = Buffer.from(mediaData.data, 'base64');
-    const customText = text || 'Solo en Desterra2 Papu';
-    const fontSize = customText.length > 25 ? 48 : 64; // Más grande
+    await sharp(buffer)
+      .resize(512, 512, { fit: 'contain' })
+      .webp({ quality: 90 })
+      .toFile(tmpFile);
 
-    const processed = await sharp(buffer)
-      .resize(512, 512, { fit: 'cover' })
-      .composite([{
-        input: Buffer.from(`
-          <svg width="512" height="512">
-            <rect x="0" y="450" width="512" height="62" fill="rgba(0,0,0,0.4)" />
-            <text x="50%" y="495" font-size="${fontSize}" font-family="Arial Black"
-            fill="white" stroke="black" stroke-width="2" text-anchor="middle">${customText}</text>
-          </svg>
-        `),
-        gravity: 'south'
-      }])
-      .webp()
-      .toBuffer();
+    const webpBase64 = fs.readFileSync(tmpFile, { encoding: 'base64' });
 
-    parentPort.postMessage({ webp: processed.toString('base64') });
+    parentPort.postMessage({ webp: webpBase64, tmpFile });
   } catch (err) {
     parentPort.postMessage({ error: err.message });
   }

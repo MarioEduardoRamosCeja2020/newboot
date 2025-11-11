@@ -125,16 +125,6 @@ async function sendSafeMessageRandom(chat, text, mentions, batchSize = 5, minDel
 }
 
 // ---------------------------
-// Función para validar admin correctamente
-// ---------------------------
-async function checkAdmin(chat, senderId) {
-  if (!chat.isGroup) return true;
-  await chat.fetchParticipants(); // asegurarse de tener lista actualizada
-  const participant = chat.participants.find(p => p.id._serialized === senderId);
-  return participant ? participant.isAdmin || participant.isSuperAdmin : false;
-}
-
-// ---------------------------
 // Mensajes
 // ---------------------------
 client.on('message', async msg => {
@@ -146,12 +136,16 @@ client.on('message', async msg => {
   if (!chat) return;
   const senderId = msg.author || msg.from;
   const now = Date.now();
+  const isAdmin = chat.isGroup ? chat.participants.find(p => p.id._serialized === senderId)?.isAdmin : true;
 
   try {
     logEvent('CMD', `${command} ejecutado`, { from: senderId, group: chat.name });
 
-    // Auto-sticker
+    // ---------------------------
+    // Auto-sticker solo admins y solo imágenes
+    // ---------------------------
     if (msg.hasMedia) {
+      if (chat.isGroup && !isAdmin) return; // No admin -> no sticker
       const media = await msg.downloadMedia();
       if (media.mimetype.startsWith('image/') && !media.filename?.endsWith('.webp')) {
         enqueue('sticker', './workers/stickerWorker.js', { media })
@@ -164,7 +158,9 @@ client.on('message', async msg => {
       return;
     }
 
+    // ---------------------------
     // Menú
+    // ---------------------------
     if (command === '.bot') {
       await chat.sendMessage(`
 🎉 MENÚ DEL BOT 🎉
@@ -181,41 +177,50 @@ client.on('message', async msg => {
       return;
     }
 
-    // ---- COMANDOS ADMIN ----
-    if (chat.isGroup && ['.todos', '.hidetag', '.notify'].includes(command)) {
-      const isAdmin = await checkAdmin(chat, senderId);
+    // ---------------------------
+    // Comando .todos
+    // ---------------------------
+    if (command === '.todos' && chat.isGroup) {
       if (!isAdmin) return chat.sendMessage('⚠️ Solo administradores pueden usar este comando.');
-
-      // Anti-spam cooldowns
-      if (command === '.todos') {
-        if (now - (groupCooldowns[chat.id._serialized]?.todos || 0) < COOLDOWNS.todos)
-          return chat.sendMessage('⏳ Espera 10 minutos antes de usar .todos otra vez.');
-        groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], todos: now };
-        const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-        await sendSafeMessageRandom(chat, '📣 INVOCACIÓN:', mentions);
-        logEvent('ACTION', 'Comando .todos ejecutado', { group: chat.name });
-      }
-
-      if (command === '.hidetag') {
-        if (now - (groupCooldowns[chat.id._serialized]?.hidetag || 0) < COOLDOWNS.hidetag)
-          return chat.sendMessage('⏳ Espera 5 minutos antes de usar .hidetag otra vez.');
-        groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], hidetag: now };
-        const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-        await sendSafeMessageRandom(chat, text || 'Mensaje oculto:', mentions, 10, 1200, 3000);
-      }
-
-      if (command === '.notify') {
-        if (now - (groupCooldowns[chat.id._serialized]?.notify || 0) < COOLDOWNS.notify)
-          return chat.sendMessage('⏳ Espera 5 minutos antes de usar .notify otra vez.');
-        groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], notify: now };
-        const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-        await sendSafeMessageRandom(chat, `📢 ${text || 'Aviso general'}`, mentions, 8, 1500, 4000);
-      }
+      if (now - (groupCooldowns[chat.id._serialized]?.todos || 0) < COOLDOWNS.todos)
+        return chat.sendMessage('⏳ Espera 10 minutos antes de usar .todos otra vez.');
+      groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], todos: now };
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
+      await sendSafeMessageRandom(chat, '📣 INVOCACIÓN:', mentions);
+      logEvent('ACTION', 'Comando .todos ejecutado', { group: chat.name });
       return;
     }
 
-    // resto: mesas, pareja, memes, imagenes, musica
-    // [Aquí puedes pegar tu bloque anterior de comandos existentes]
+    // ---------------------------
+    // Comando .hidetag
+    // ---------------------------
+    if (command === '.hidetag' && chat.isGroup) {
+      if (!isAdmin) return chat.sendMessage('⚠️ Solo los admins pueden usar este comando.');
+      if (now - (groupCooldowns[chat.id._serialized]?.hidetag || 0) < COOLDOWNS.hidetag)
+        return chat.sendMessage('⏳ Espera 5 minutos antes de usar .hidetag otra vez.');
+      groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], hidetag: now };
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
+      await sendSafeMessageRandom(chat, text || 'Mensaje oculto:', mentions, 10, 1200, 3000);
+      return;
+    }
+
+    // ---------------------------
+    // Comando .notify
+    // ---------------------------
+    if (command === '.notify' && chat.isGroup) {
+      if (!isAdmin) return chat.sendMessage('⚠️ Solo los admins pueden usar este comando.');
+      if (now - (groupCooldowns[chat.id._serialized]?.notify || 0) < COOLDOWNS.notify)
+        return chat.sendMessage('⏳ Espera 5 minutos antes de usar .notify otra vez.');
+      groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], notify: now };
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
+      await sendSafeMessageRandom(chat, `📢 ${text || 'Aviso general'}`, mentions, 8, 1500, 4000);
+      return;
+    }
+
+    // ---------------------------
+    // Resto: mesas, pareja, memes, imagenes, musica
+    // ---------------------------
+    // [Aquí puedes mantener tu lógica previa]
 
   } catch (err) {
     logEvent('ERROR', 'Error general', { error: err.message });

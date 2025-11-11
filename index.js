@@ -13,19 +13,29 @@ import { Worker } from 'worker_threads';
 // ---------------------------
 const cache = { mesas: [], parejas: [] };
 
-async function getMesa(chatId) { return cache.mesas.find(m => m.chat_id === chatId); }
+async function getMesa(chatId) {
+  return cache.mesas.find(m => m.chat_id === chatId);
+}
+
 async function setMesa(chatId, jugadores, max, tema) {
   const existing = cache.mesas.find(m => m.chat_id === chatId);
   if (!existing) cache.mesas.push({ chat_id: chatId, jugadores, max, tema });
   else Object.assign(existing, { jugadores, max, tema });
 }
-async function deleteMesa(chatId) { cache.mesas = cache.mesas.filter(m => m.chat_id !== chatId); }
+
+async function deleteMesa(chatId) {
+  cache.mesas = cache.mesas.filter(m => m.chat_id !== chatId);
+}
+
 async function setPareja(chatId, user1, user2) {
   const existing = cache.parejas.find(p => p.chat_id === chatId);
-  if (!existing) cache.parejas.push({ chat_id, user1, user2 });
+  if (!existing) cache.parejas.push({ chat_id: chatId, user1, user2 });
   else Object.assign(existing, { user1, user2 });
 }
-function isValidUserId(id) { return typeof id === 'string' && id.includes('@'); }
+
+function isValidUserId(id) {
+  return typeof id === 'string' && id.includes('@');
+}
 
 // ---------------------------
 // Sesión persistente segura
@@ -38,7 +48,7 @@ function loadSession() {
   if (!fs.existsSync(SESSION_FILE_PATH)) return null;
   try {
     const raw = fs.readFileSync(SESSION_FILE_PATH, 'utf-8');
-    if (!raw) return null; // archivo vacío
+    if (!raw) return null;
     return JSON.parse(raw);
   } catch (err) {
     console.warn('⚠️ Sesión corrupta o inválida, se reiniciará:', err.message);
@@ -74,6 +84,17 @@ client.on('qr', qr => qrcode.generate(qr, { small: true }));
 
 client.on('ready', async () => {
   console.log('😎🐐🇫🇷 Bot rápido listo y conectado 😎🐐🇫🇷');
+
+  // Enviar mensaje a todos los grupos donde está el bot
+  const chats = await client.getChats();
+  const groups = chats.filter(c => c.isGroup);
+  for (const group of groups) {
+    try {
+      await group.sendMessage('😎🐐🇫🇷 El bot está activo y listo para usar 😎🐐🇫🇷');
+    } catch (err) {
+      console.error('⚠️ Error al enviar mensaje de inicio:', err.message);
+    }
+  }
 });
 
 // ---------------------------
@@ -91,7 +112,6 @@ client.on('message', async msg => {
   if (!chat) return;
 
   try {
-     await chat.sendMessage('🚀 ¡Hola! El bot está listo y funcionando 😎🐐🇫🇷');
     // ---------------------------
     // Menú principal
     // ---------------------------
@@ -116,30 +136,18 @@ client.on('message', async msg => {
     // ---------------------------
     // Comando: .todos
     // ---------------------------
-if (command === '.todos' && chat.isGroup) {
-  // Filtra IDs válidos de los participantes
-  const mentions = chat.participants
-    .map(p => p.id._serialized)
-    .filter(isValidUserId);
+    if (command === '.todos' && chat.isGroup) {
+      const mentions = chat.participants
+        .map(p => p.id._serialized)
+        .filter(isValidUserId);
 
-  if (!mentions.length) {
-    await chat.sendMessage('⚠️ No se encontraron participantes válidos en este grupo.');
-    return;
-  }
+      if (!mentions.length)
+        return await chat.sendMessage('⚠️ No se encontraron participantes válidos.');
 
-  // Construye el mensaje con saltos de línea para mejor legibilidad
-  const mentionLines = mentions
-    .map(m => `@${m.split('@')[0]}`)
-    .join(' ');
-
-  const message = `📣 *INVOCACION:* \n${mentionLines}`;
-
-  // Envía el mensaje con las menciones correctamente
-  await chat.sendMessage(message, { mentions });
-
-  return;
-}
-
+      const mentionLines = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+      await chat.sendMessage(`📣 *INVOCACIÓN:* \n${mentionLines}`, { mentions });
+      return;
+    }
 
     // ---------------------------
     // Comando: .hidetag
@@ -181,115 +189,49 @@ if (command === '.todos' && chat.isGroup) {
       return;
     }
 
-// ---------------------------
-// Comando: .formarpareja
-// ---------------------------
-if (command === '.formarpareja' && chat.isGroup) {
-  try {
-    // Filtrar participantes válidos
-    const participantes = chat.participants
-      .map(p => p.id._serialized)
-      .filter(isValidUserId);
-
-    if (participantes.length < 2) {
-      await chat.sendMessage('⚠️ No hay suficientes participantes para formar pareja.');
-      return;
-    }
-
-    // Mezclar participantes y elegir pareja
-    const shuffled = participantes.sort(() => Math.random() - 0.5);
-    const [a, b] = shuffled;
-
-    // Guardar pareja en cache
-    await setPareja(chat.id._serialized, a, b);
-
-    // Frases aleatorias para la pareja
-    const mensajesPareja = [
-      '💞 ¡Juntos por siempre! 🌹',
-      '❤️ Amor eterno para esta parejita 💖',
-      '💌 Unidos hasta la próxima aventura',
-      '🌟 ¡La química es real! 💫',
-      '💕 Una mesada de amor y risas para ustedes',
-      '💘 Pareja sellada con risas y chocolate 🍫',
-      '✨ Que la fuerza del amor los acompañe siempre 💫'
-    ];
-    const mensaje = mensajesPareja[Math.floor(Math.random() * mensajesPareja.length)];
-
-    // Enviar mensaje al grupo
-    await chat.sendMessage(
-      `💞 Pareja formada: @${a.split('@')[0]} ❤️ @${b.split('@')[0]}\n${mensaje}`,
-      { mentions: [a, b] }
-    );
-  } catch (err) {
-    console.error('💥 Error al formar pareja:', err);
-    await chat.sendMessage('⚠️ Ocurrió un error al formar la pareja, inténtalo de nuevo.');
-  }
-}
-
-
     // ---------------------------
-    // Comando: .memes
+    // Comando: .formarpareja
     // ---------------------------
-    if (command === '.memes') {
-      await chat.sendMessage('🤣 Buscando un meme...');
-      const worker = new Worker('./workers/memeWorker.js');
-      worker.on('message', async (result) => {
-        if (result.error) await chat.sendMessage('⚠️ Error al obtener meme.');
-        else await chat.sendMessage(new MessageMedia('image/png', result.base64));
-      });
-      return;
-    }
+    if (command === '.formarpareja' && chat.isGroup) {
+      try {
+        const participantes = chat.participants
+          .map(p => p.id._serialized)
+          .filter(isValidUserId);
 
-    // ---------------------------
-    // Comando: .imagenes
-    // ---------------------------
-    if (command === '.imagenes') {
-      if (!text) return await chat.sendMessage('⚠️ Usa: *.imagenes <descripción>*');
-      await chat.sendMessage(`🖼️ Generando imagen: *${text}* ...`);
-      const worker = new Worker('./workers/imageWorker.js', { workerData: { prompt: text } });
-      worker.on('message', async (result) => {
-        if (result.error) await chat.sendMessage('⚠️ Error al generar la imagen.');
-        else await chat.sendMessage(new MessageMedia('image/png', result.base64));
-      });
-      return;
-    }
+        if (participantes.length < 2)
+          return await chat.sendMessage('⚠️ No hay suficientes participantes.');
 
-    // ---------------------------
-    // Comando: .sticker
-    // ---------------------------
-    if (command === '.sticker' && msg.hasMedia) {
-      const worker = new Worker('./workers/stickerWorker.js', { workerData: { mediaData: await msg.downloadMedia(), text } });
-      worker.on('message', async (result) => {
-        if (result.error) await chat.sendMessage('⚠️ Error al crear sticker.');
-        else await msg.reply(new MessageMedia('image/webp', result.webp), undefined, { sendMediaAsSticker: true });
-      });
-      return;
-    }
+        const shuffled = participantes.sort(() => Math.random() - 0.5);
+        const [a, b] = shuffled;
+        await setPareja(chat.id._serialized, a, b);
 
-    // ---------------------------
-    // Comando: .musica
-    // ---------------------------
-    if (command === '.musica') {
-      if (!text) return await chat.sendMessage('⚠️ Usa: *.musica <nombre>*');
-      await chat.sendMessage(`🎵 Buscando *${text}*...`);
-      const worker = new Worker('./workers/musicWorker.js', { workerData: { query: text } });
-      worker.on('message', async (result) => {
-        if (result.error) await chat.sendMessage('⚠️ Error al descargar canción.');
-        else await chat.sendMessage(`🎶 ${result.title}`, { media: fs.createReadStream(result.file) }, () => fs.unlink(result.file, () => {}));
-      });
+        const frases = [
+          '💞 ¡Juntos por siempre! 🌹',
+          '❤️ Amor eterno para esta parejita 💖',
+          '💌 Unidos hasta la próxima aventura',
+          '🌟 ¡La química es real! 💫',
+          '💕 Una mesada de amor y risas para ustedes',
+          '💘 Pareja sellada con risas y chocolate 🍫',
+          '✨ Que la fuerza del amor los acompañe siempre 💫'
+        ];
+        const frase = frases[Math.floor(Math.random() * frases.length)];
+
+        await chat.sendMessage(`💞 Pareja formada: @${a.split('@')[0]} ❤️ @${b.split('@')[0]}\n${frase}`, { mentions: [a, b] });
+      } catch (err) {
+        console.error('💥 Error al formar pareja:', err);
+        await chat.sendMessage('⚠️ Error al formar pareja.');
+      }
       return;
     }
 
     // ---------------------------
     // Comando desconocido
     // ---------------------------
-  if (raw.startsWith('.')) {
-  const command = raw.split(' ')[0]; // toma solo el comando sin argumentos
-  const comandosValidos = ['.todos', '.formarpareja', '.musica', '.sticker']; // lista de tus comandos
-  if (!comandosValidos.includes(command)) {
-    await chat.sendMessage(`😎🐐🇫🇷🤔 Comando "${command}" no reconocido. Usa *.bot* para ver opciones.😎🐐🇫🇷`);
-  }
-}
+    const comandosValidos = ['.bot', '.todos', '.hidetag', '.mesa4', '.mesa6', '.formarpareja', '.musica', '.imagenes', '.memes', '.sticker'];
+    if (raw.startsWith('.') && !comandosValidos.includes(command)) {
+      await chat.sendMessage(`😎🐐🇫🇷🤔 Comando "${command}" no reconocido. Usa *.bot* para ver opciones.😎🐐🇫🇷`);
+      return;
+    }
 
   } catch (err) {
     console.error('💥 Error general:', err);
@@ -303,5 +245,5 @@ client.initialize();
 // Servidor Express
 // ---------------------------
 const app = express();
-app.get('/', (_, res) => res.send('😎🐐🇫🇷 Bot  Turbo corriendo 😎🐐🇫🇷'));
+app.get('/', (_, res) => res.send('😎🐐🇫🇷 Bot Turbo corriendo 😎🐐🇫🇷'));
 app.listen(process.env.PORT || 3000, '0.0.0.0', () => console.log('🌐 Servidor Express activo.'));

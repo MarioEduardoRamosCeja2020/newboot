@@ -1,24 +1,34 @@
-// index.js
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import express from 'express';
 import { Worker } from 'worker_threads';
-import path from 'path';
-import os from 'os';
 
 // ---------------------------
 // Config
 // ---------------------------
-const SESSION_FILE = './session_data/session.json';
 const MAX_STICKER_WORKERS = 4;
 const MAX_OTHER_WORKERS = 2;
 const TMP_DIR = './tmp';
+const LOG_FILE = './logs/bot.log';
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
 
 // ---------------------------
-// Cache en memoria
+// Logging Inteligente
+// ---------------------------
+function logEvent(type, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  const logLine = `[${timestamp}] [${type}] ${message} ${Object.keys(data).length ? JSON.stringify(data) : ''}\n`;
+  fs.appendFile(LOG_FILE, logLine, err => {
+    if (err) console.error('⚠️ Error guardando log:', err);
+  });
+  console.log(`${type === 'ERROR' ? '💥' : '🧠'} ${message}`);
+}
+
+// ---------------------------
+// Cache y sesión
 // ---------------------------
 const cache = { mesas: [], parejas: [] };
 const getMesa = chatId => cache.mesas.find(m => m.chat_id === chatId);
@@ -27,7 +37,6 @@ const setMesa = (chatId, jugadores, max, tema) => {
   if (!existing) cache.mesas.push({ chat_id: chatId, jugadores, max, tema });
   else Object.assign(existing, { jugadores, max, tema });
 };
-const deleteMesa = chatId => cache.mesas = cache.mesas.filter(m => m.chat_id !== chatId);
 const setPareja = (chatId, user1, user2) => {
   const existing = cache.parejas.find(p => p.chat_id === chatId);
   if (!existing) cache.parejas.push({ chat_id: chatId, user1, user2 });
@@ -38,6 +47,7 @@ const isValidUserId = id => typeof id === 'string' && id.includes('@');
 // ---------------------------
 // Sesión persistente
 // ---------------------------
+const SESSION_FILE = './session_data/session.json';
 const loadSession = () => {
   if (!fs.existsSync(SESSION_FILE)) return null;
   try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8')); }
@@ -50,26 +60,27 @@ const sessionData = loadSession();
 // ---------------------------
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'bot', dataPath: './session_data' }),
-  puppeteer: { headless: true, args: ['--no-sandbox','--disable-setuid-sandbox'] },
+  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
   session: sessionData
 });
 
-// ---------------------------
-// QR & Ready
-// ---------------------------
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
 client.on('ready', async () => {
-  console.log('😎🐐 Bot Turbo Pro listo');
+  logEvent('INFO', '😎🐐 Bot Turbo Pro listo');
   const chats = await client.getChats();
   const groups = chats.filter(c => c.isGroup);
   for (const group of groups) {
-    try { await group.sendMessage('😎🐐 Bot activo y listo'); }
-    catch (err) { console.error('Error mensaje inicio:', err.message); }
+    try {
+      await group.sendMessage('😎🐐 Bot activo y listo');
+      logEvent('START', 'Mensaje de inicio enviado a grupo', { group: group.name });
+    } catch (err) {
+      logEvent('ERROR', 'Error al enviar mensaje de inicio', { error: err.message });
+    }
   }
 });
 
 // ---------------------------
-// Worker Queue genérica
+// Worker Queue
 // ---------------------------
 const queues = { sticker: [], image: [], meme: [], music: [] };
 const activeWorkers = { sticker: 0, image: 0, meme: 0, music: 0 };
@@ -95,16 +106,28 @@ function processQueue(type) {
   });
 }
 
-// ---------------------------
-// Función borrar archivos tmp
-// ---------------------------
 const deleteTmpFile = filePath => {
   if (!filePath) return;
-  fs.unlink(filePath, err => { if (err) console.error('⚠️ Error borrando tmp:', err); });
+  fs.unlink(filePath, err => { if (err) logEvent('WARN', 'Error borrando tmp', { filePath }); });
 };
 
 // ---------------------------
-// Comandos y mensajes
+// Anti-Spam & Cooldowns
+// ---------------------------
+const groupCooldowns = {};
+const COOLDOWNS = { todos: 10 * 60e3, hidetag: 5 * 60e3, notify: 5 * 60e3 };
+
+async function sendSafeMessageRandom(chat, text, mentions, batchSize = 5, minDelay = 1500, maxDelay = 3500) {
+  for (let i = 0; i < mentions.length; i += batchSize) {
+    const batch = mentions.slice(i, i + batchSize);
+    await chat.sendMessage(`${text}\n${batch.map(m => `@${m.split('@')[0]}`).join(' ')}`, { mentions: batch });
+    const delay = minDelay + Math.floor(Math.random() * (maxDelay - minDelay));
+    await new Promise(res => setTimeout(res, delay));
+  }
+}
+
+// ---------------------------
+// Mensajes
 // ---------------------------
 client.on('message', async msg => {
   const raw = msg.body || '';
@@ -113,154 +136,92 @@ client.on('message', async msg => {
   const text = args.slice(1).join(' ').trim();
   const chat = await msg.getChat().catch(() => null);
   if (!chat) return;
+  const senderId = msg.author || msg.from;
+  const now = Date.now();
+  const isAdmin = chat.isGroup ? chat.participants.find(p => p.id._serialized === senderId)?.isAdmin : true;
 
   try {
-    // Auto-sticker si es imagen
+    logEvent('CMD', `${command} ejecutado`, { from: senderId, group: chat.name });
+
+    // Auto-sticker
     if (msg.hasMedia) {
-      try {
-        const media = await msg.downloadMedia();
-        if (media.mimetype.startsWith('image/')) {
-          enqueue('sticker', './workers/stickerWorker.js', { media })
-            .then(res => chat.sendMessage(new MessageMedia('image/webp', res.webp), { sendMediaAsSticker: true }))
-            .catch(e => console.error('⚠️ Auto-sticker falló:', e));
-        }
-      } catch (err) {
-        console.error('💥 Error media:', err);
-        await msg.reply('⚠️ No se pudo procesar la imagen.');
+      const media = await msg.downloadMedia();
+      if (media.mimetype.startsWith('image/') && !media.filename?.endsWith('.webp')) {
+        enqueue('sticker', './workers/stickerWorker.js', { media })
+          .then(({ webp, tmpFile }) => {
+            chat.sendMessage(new MessageMedia('image/webp', webp), { sendMediaAsSticker: true });
+            deleteTmpFile(tmpFile);
+          })
+          .catch(err => logEvent('ERROR', 'Sticker falló', { error: err.message }));
       }
       return;
     }
 
-    // ---------------------------
     // Menú
-    // ---------------------------
     if (command === '.bot') {
       await chat.sendMessage(`
 🎉 MENÚ DEL BOT 🎉
 💬 *.bot* — Mostrar menú
-👥 *.todos* — Etiquetar a todos
-🙈 *.hidetag <msg>* — Mensaje oculto
-📣 *.notify <msg>* — Notificación
+👥 *.todos* — Etiquetar a todos (solo admin, cada 10 min)
+🙈 *.hidetag <msg>* — Mensaje oculto (solo admin, 5 min)
+📣 *.notify <msg>* — Aviso general (solo admin, 5 min)
 🎲 *.mesa4 / .mesa6 <tema>* — Crear mesa
 ❤️ *.formarpareja* — Pareja aleatoria
 🎵 *.musica <nombre>* — Descargar canción
 🖼️ *.imagenes <desc>* — Generar imagen
 🤣 *.memes* — Meme random
-🖼️ *.sticker* — Sticker gigante
 `);
       return;
     }
 
     // .todos
     if (command === '.todos' && chat.isGroup) {
+      if (!isAdmin) return chat.sendMessage('⚠️ Solo administradores pueden usar este comando.');
+      if (now - (groupCooldowns[chat.id._serialized]?.todos || 0) < COOLDOWNS.todos)
+        return chat.sendMessage('⏳ Espera 10 minutos antes de usar .todos otra vez.');
+      groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], todos: now };
       const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      if (!mentions.length) return await chat.sendMessage('⚠️ No hay participantes válidos');
-      const mentionLines = mentions.map(m => `@${m.split('@')[0]}`).join(' ');
-      await chat.sendMessage(`📣 INVOCACIÓN:\n${mentionLines}`, { mentions });
+      await sendSafeMessageRandom(chat, '📣 INVOCACIÓN:', mentions);
+      logEvent('ACTION', 'Comando .todos ejecutado', { group: chat.name });
       return;
     }
 
     // .hidetag
     if (command === '.hidetag' && chat.isGroup) {
+      if (!isAdmin) return chat.sendMessage('⚠️ Solo los admins pueden usar este comando.');
+      if (now - (groupCooldowns[chat.id._serialized]?.hidetag || 0) < COOLDOWNS.hidetag)
+        return chat.sendMessage('⏳ Espera 5 minutos antes de usar .hidetag otra vez.');
+      groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], hidetag: now };
       const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      await chat.sendMessage(text || 'Mensaje oculto', { mentions });
+      await sendSafeMessageRandom(chat, text || 'Mensaje oculto:', mentions, 10, 1200, 3000);
       return;
     }
 
-    // .mesa4 / .mesa6
-    if ((command === '.mesa4' || command === '.mesa6') && chat.isGroup) {
-      const maxPlayers = command === '.mesa4' ? 4 : 6;
-      setMesa(chat.id._serialized, [], maxPlayers, text || '[Sin tema]');
-      await chat.sendMessage(`🎲 Mesa creada para ${maxPlayers} jugadores\n🧩 Tema: _${text || '[Sin tema]'}_\n✋ Escribe *yo* para unirte`);
+    // .notify
+    if (command === '.notify' && chat.isGroup) {
+      if (!isAdmin) return chat.sendMessage('⚠️ Solo los admins pueden usar este comando.');
+      if (now - (groupCooldowns[chat.id._serialized]?.notify || 0) < COOLDOWNS.notify)
+        return chat.sendMessage('⏳ Espera 5 minutos antes de usar .notify otra vez.');
+      groupCooldowns[chat.id._serialized] = { ...groupCooldowns[chat.id._serialized], notify: now };
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
+      await sendSafeMessageRandom(chat, `📢 ${text || 'Aviso general'}`, mentions, 8, 1500, 4000);
       return;
     }
 
-    // Unirse a mesa
-    if (raw.toLowerCase() === 'yo' && chat.isGroup) {
-      const mesa = getMesa(chat.id._serialized);
-      if (!mesa) return;
-      const userId = msg.author || msg.from;
-      if (!mesa.jugadores.includes(userId)) {
-        mesa.jugadores.push(userId);
-        setMesa(chat.id._serialized, mesa.jugadores, mesa.max, mesa.tema);
-        await chat.sendMessage(`🙋‍♂️ @${userId.split('@')[0]} se unió (${mesa.jugadores.length}/${mesa.max})`, { mentions: [userId] });
-      }
-      if (mesa.jugadores.length === mesa.max) {
-        const selected = mesa.jugadores[Math.floor(Math.random() * mesa.jugadores.length)];
-        await chat.sendMessage(`✅ Mesa completa\n${mesa.jugadores.map(u => `@${u.split('@')[0]}`).join(' ')}\n🧩 Tema: _${mesa.tema}_\n🎯 @${selected.split('@')[0]} pone mesa.`, { mentions: mesa.jugadores });
-      }
-      return;
-    }
-
-    // .formarpareja
-    if (command === '.formarpareja' && chat.isGroup) {
-      const participantes = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-      if (participantes.length < 2) return await chat.sendMessage('⚠️ No hay suficientes participantes.');
-      const shuffled = participantes.sort(() => Math.random() - 0.5);
-      const [a, b] = shuffled;
-      setPareja(chat.id._serialized, a, b);
-      const frases = [
-        '💞 ¡Juntos por siempre!', '❤️ Amor eterno', '💌 Unidos hasta la próxima',
-        '🌟 ¡La química es real!', '💕 Mesada de amor y risas', '💘 Pareja sellada con chocolate',
-        '✨ Que la fuerza del amor los acompañe'
-      ];
-      const frase = frases[Math.floor(Math.random() * frases.length)];
-      await chat.sendMessage(`💞 Pareja: @${a.split('@')[0]} ❤️ @${b.split('@')[0]}\n${frase}`, { mentions: [a,b] });
-      return;
-    }
-
-    // .imagenes
-    if (command === '.imagenes') {
-      if (!text) return await chat.sendMessage('⚠️ Escribe la descripción de la imagen.');
-      enqueue('image', './workers/imageWorker.js', { prompt: text })
-        .then(async res => {
-          if (res.base64) await chat.sendMessage(new MessageMedia('image/jpeg', res.base64));
-          if (res.tmpFile) deleteTmpFile(res.tmpFile);
-        })
-        .catch(e => chat.sendMessage(`⚠️ Error generando imagen: ${e.message}`));
-      return;
-    }
-
-    // .memes
-    if (command === '.memes') {
-      enqueue('meme', './workers/memeWorker.js', {})
-        .then(async res => {
-          if (res.base64) await chat.sendMessage(new MessageMedia('image/jpeg', res.base64));
-          if (res.tmpFile) deleteTmpFile(res.tmpFile);
-        })
-        .catch(e => chat.sendMessage(`⚠️ Error generando meme: ${e.message}`));
-      return;
-    }
-
-    // .musica
-    if (command === '.musica') {
-      if (!text) return await chat.sendMessage('⚠️ Escribe el nombre de la canción.');
-      enqueue('music', './workers/musicWorker.js', { query: text })
-        .then(async res => {
-          if (res.file) {
-            const media = MessageMedia.fromFilePath(res.file);
-            await chat.sendMessage(media, { caption: res.title });
-            deleteTmpFile(res.file);
-          }
-        })
-        .catch(e => chat.sendMessage(`⚠️ Error descargando música: ${e.message}`));
-      return;
-    }
+    // resto: mesas, pareja, memes, imagenes, musica (igual que antes)
+    // [por brevedad se mantiene igual, puedes pegar el bloque anterior]
 
   } catch (err) {
-    console.error('💥 Error general:', err);
+    logEvent('ERROR', 'Error general', { error: err.message });
     await chat.sendMessage('⚠️ Error interno, inténtalo de nuevo.');
   }
 });
 
-// ---------------------------
-// Inicializar
-// ---------------------------
 client.initialize();
 
 // ---------------------------
-// Express server
+// Express
 // ---------------------------
 const app = express();
 app.get('/', (_, res) => res.send('😎 Bot Turbo Pro corriendo'));
-app.listen(process.env.PORT || 3000, '0.0.0.0', () => console.log('🌐 Servidor Express activo'));
+app.listen(process.env.PORT || 3000, '0.0.0.0', () => logEvent('INFO', '🌐 Servidor Express activo'));

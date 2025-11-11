@@ -1,4 +1,3 @@
-// workers/stickerWorker.js
 import { parentPort, workerData } from 'worker_threads';
 import fs from 'fs';
 import sharp from 'sharp';

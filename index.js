@@ -5,7 +5,6 @@ import fs from 'fs';
 import express from 'express';
 import { Worker } from 'worker_threads';
 import path from 'path';
-import os from 'os';
 import sharp from 'sharp';
 
 // ---------------------------
@@ -27,7 +26,7 @@ function logEvent(type, message, data = {}) {
 }
 
 // ---------------------------
-// Utilidades
+// Utils
 // ---------------------------
 const isValidUserId = id => typeof id === 'string' && id.includes('@');
 const deleteTmpFile = filePath => { if (filePath) fs.unlink(filePath, err => {}); };
@@ -57,19 +56,19 @@ function processQueue(type) {
 }
 
 // ---------------------------
-// Enviar mensajes de manera segura
+// Enviar mensajes seguros
 // ---------------------------
 async function sendSafeMessageRandom(chat, text, mentions, batchSize = 5, minDelay = 1500, maxDelay = 3500) {
-  try {
-    for (let i = 0; i < mentions.length; i += batchSize) {
-      const batch = mentions.slice(i, i + batchSize);
-      try {
-        await chat.sendMessage(`${text}\n${batch.map(m => `@${m.split('@')[0]}`).join(' ')}`, { mentions: batch });
-      } catch {}
-      const delay = minDelay + Math.floor(Math.random() * (maxDelay - minDelay));
-      await new Promise(res => setTimeout(res, delay));
+  for (let i = 0; i < mentions.length; i += batchSize) {
+    const batch = mentions.slice(i, i + batchSize);
+    try {
+      await chat.sendMessage(`${text}\n${batch.map(m => `@${m.split('@')[0]}`).join(' ')}`, { mentions: batch });
+    } catch (err) {
+      logEvent('ERROR', 'Error enviando mensaje batch', { error: err.message });
     }
-  } catch {}
+    const delay = minDelay + Math.floor(Math.random() * (maxDelay - minDelay));
+    await new Promise(res => setTimeout(res, delay));
+  }
 }
 
 // ---------------------------
@@ -92,6 +91,9 @@ client.on('ready', async () => {
   } catch {}
 });
 
+// ---------------------------
+// Mensajes entrantes
+// ---------------------------
 client.on('message', async msg => {
   const raw = msg.body || '';
   const args = raw.trim().split(' ');
@@ -102,20 +104,51 @@ client.on('message', async msg => {
 
   try {
     // ---------------------------
-    // Sticker automático seguro
+    // Sticker automático seguro + redimensionamiento
     // ---------------------------
     if (msg.hasMedia) {
       try {
-        const media = await msg.downloadMedia();
-        if (media.mimetype?.startsWith('image/') && !media.filename?.endsWith('.webp')) {
+        let media = await msg.downloadMedia();
+
+        if (
+          media &&
+          media.data &&
+          media.mimetype?.startsWith('image/') &&
+          !media.filename?.endsWith('.webp') &&
+          !media.mimetype.includes('gif')
+        ) {
+          // Convertimos base64 a Buffer para Sharp
+          let imgBuffer = Buffer.from(media.data, 'base64');
+
+          // Redimensionar si es mayor a 512x512
+          const metadata = await sharp(imgBuffer).metadata();
+          if (metadata.width > 512 || metadata.height > 512) {
+            imgBuffer = await sharp(imgBuffer)
+              .resize({ width: 512, height: 512, fit: 'inside' })
+              .toBuffer();
+            media.data = imgBuffer.toString('base64');
+          }
+
           enqueue('sticker', './workers/stickerWorker.js', { media })
-            .then(({ webp, tmpFile }) => {
-              try { chat.sendMessage(new MessageMedia('image/webp', webp), { sendMediaAsSticker: true }); } catch {}
-              deleteTmpFile(tmpFile);
+            .then(async ({ webp, tmpFile }) => {
+              try {
+                if (webp) {
+                  const stickerMedia = new MessageMedia('image/webp', webp);
+                  await chat.sendMessage(stickerMedia, { sendMediaAsSticker: true });
+                }
+              } catch (err) {
+                logEvent('ERROR', 'Error enviando sticker', { error: err.message });
+              } finally {
+                deleteTmpFile(tmpFile);
+              }
             })
-            .catch(err => logEvent('ERROR', 'Sticker falló', { error: err.message }));
+            .catch(err => logEvent('ERROR', 'Sticker Worker falló', { error: err.message }));
+        } else {
+          logEvent('INFO', 'Media ignorada (no es imagen estática compatible)');
         }
-      } catch {}
+      } catch (err) {
+        logEvent('ERROR', 'Error descargando o procesando media', { error: err.message });
+      }
       return;
     }
 

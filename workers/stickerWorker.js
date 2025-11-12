@@ -7,27 +7,24 @@ import os from 'os';
 (async () => {
   try {
     const { media } = workerData;
+    if (!media || !media.data || !media.mimetype) throw new Error('No media recibido');
+
     const buffer = Buffer.from(media.data, 'base64');
     const tmpFile = path.join(os.tmpdir(), `sticker-${Date.now()}.webp`);
 
-    // Solo imágenes o GIFs
-    if (!media.mimetype?.startsWith('image/')) {
-      return parentPort.postMessage({ error: 'No es imagen ni GIF' });
-    }
-
-    const isGif = media.mimetype === 'image/gif';
-
-    if (isGif) {
+    if (media.mimetype === 'image/gif') {
       // GIF animado → WebP animado
       await sharp(buffer, { animated: true })
         .webp({ quality: 90, effort: 6, animated: true })
         .toFile(tmpFile);
-    } else {
+    } else if (media.mimetype.startsWith('image/')) {
       // Imagen normal → WebP
       await sharp(buffer)
         .resize({ width: 512, height: 512, fit: 'inside' })
         .webp({ quality: 90 })
         .toFile(tmpFile);
+    } else {
+      throw new Error('Solo se pueden generar stickers a partir de imágenes o GIFs');
     }
 
     const webpBuffer = fs.readFileSync(tmpFile);

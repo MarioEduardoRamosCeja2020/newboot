@@ -1,4 +1,3 @@
-// workers/stickerWorker.js
 import { parentPort, workerData } from 'worker_threads';
 import fs from 'fs';
 import sharp from 'sharp';
@@ -11,7 +10,11 @@ import os from 'os';
     const buffer = Buffer.from(media.data, 'base64');
     const tmpFile = path.join(os.tmpdir(), `sticker-${Date.now()}.webp`);
 
-    // Detectamos tipo de archivo
+    // Solo imágenes o GIFs
+    if (!media.mimetype?.startsWith('image/')) {
+      return parentPort.postMessage({ error: 'No es imagen ni GIF' });
+    }
+
     const isGif = media.mimetype === 'image/gif';
 
     if (isGif) {
@@ -27,7 +30,6 @@ import os from 'os';
         .toFile(tmpFile);
     }
 
-    // Leemos el archivo resultante y lo convertimos a Base64
     const webpBuffer = fs.readFileSync(tmpFile);
     const webpBase64 = webpBuffer.toString('base64');
 

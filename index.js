@@ -7,71 +7,61 @@ import { Worker } from 'worker_threads';
 import path from 'path';
 import os from 'os';
 
-// ---------------------------
-// Config
-// ---------------------------
 const TMP_DIR = './tmp';
-const LOG_FILE = './logs/bot.log';
+const LOG_DIR = './logs';
+const LOG_FILE = path.join(LOG_DIR, 'bot.log');
+
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 // ---------------------------
 // Logging
 // ---------------------------
-function logEvent(type, message, data = {}) {
-  const timestamp = new Date().toISOString();
-  const logLine = `[${timestamp}] [${type}] ${message} ${Object.keys(data).length ? JSON.stringify(data) : ''}\n`;
-  fs.appendFile(LOG_FILE, logLine, err => { if (err) console.error('⚠️ Error guardando log:', err); });
-  console.log(`${type === 'ERROR' ? '💥' : '🧠'} ${message}`);
+function log(type, msg, data = {}) {
+  const time = new Date().toISOString();
+  const line = `[${time}] [${type}] ${msg} ${Object.keys(data).length ? JSON.stringify(data) : ''}\n`;
+  fs.appendFile(LOG_FILE, line, () => {});
+  console.log(`${type === 'ERROR' ? '💥' : '🧠'} ${msg}`);
 }
 
 // ---------------------------
-// Utilidades
+// Helpers
 // ---------------------------
-const isValidUserId = id => typeof id === 'string' && id.includes('@');
-const deleteTmpFile = filePath => { if (filePath) fs.unlink(filePath, err => {}); };
+const isValidId = id => typeof id === 'string' && id.includes('@');
+const deleteTmp = file => { if (file) fs.unlink(file, () => {}); };
+
+async function batchSend(chat, text, mentions, batchSize = 10, minDelay = 1200, maxDelay = 3500) {
+  for (let i = 0; i < mentions.length; i += batchSize) {
+    const batch = mentions.slice(i, i + batchSize);
+    try {
+      await chat.sendMessage(`${text}\n${batch.map(m => `@${m.split('@')[0]}`).join(' ')}`, { mentions: batch });
+    } catch {}
+    const delay = minDelay + Math.floor(Math.random() * (maxDelay - minDelay));
+    await new Promise(r => setTimeout(r, delay));
+  }
+}
 
 // ---------------------------
-// Queue de Workers
+// Worker queue
 // ---------------------------
-const queues = { sticker: [] };
-const activeWorkers = { sticker: 0 };
+const queues = { sticker: [], meme: [] };
+const activeWorkers = { sticker: 0, meme: 0 };
+
 function enqueue(type, workerFile, workerData) {
   return new Promise((resolve, reject) => {
     queues[type].push({ workerFile, workerData, resolve, reject });
     processQueue(type);
   });
 }
+
 function processQueue(type) {
   if (!queues[type].length) return;
   const { workerFile, workerData, resolve, reject } = queues[type].shift();
   activeWorkers[type]++;
   const worker = new Worker(workerFile, { workerData });
-  worker.on('message', msg => {
-    if (msg.error) reject(new Error(msg.error));
-    else resolve(msg);
-  });
+  worker.on('message', msg => resolve(msg));
   worker.on('error', err => reject(err));
-  worker.on('exit', () => {
-    activeWorkers[type]--;
-    processQueue(type);
-  });
-}
-
-// ---------------------------
-// Enviar mensajes de manera segura
-// ---------------------------
-async function sendSafeMessageRandom(chat, text, mentions, batchSize = 5, minDelay = 1500, maxDelay = 3500) {
-  try {
-    for (let i = 0; i < mentions.length; i += batchSize) {
-      const batch = mentions.slice(i, i + batchSize);
-      try {
-        await chat.sendMessage(`${text}\n${batch.map(m => `@${m.split('@')[0]}`).join(' ')}`, { mentions: batch });
-      } catch {}
-      const delay = minDelay + Math.floor(Math.random() * (maxDelay - minDelay));
-      await new Promise(res => setTimeout(res, delay));
-    }
-  } catch {}
+  worker.on('exit', () => { activeWorkers[type]--; processQueue(type); });
 }
 
 // ---------------------------
@@ -83,98 +73,131 @@ const client = new Client({
 });
 
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
-
 client.on('ready', async () => {
-  logEvent('INFO', '😎🐐 Bot Turbo Pro listo');
+  log('INFO', '😎🐐 Bot Pro listo');
   try {
     const chats = await client.getChats();
-    const groups = chats.filter(c => c.isGroup);
-    for (const group of groups) {
-      try { await group.sendMessage('😎🐐 Bot activo y listo'); } catch {}
+    for (const group of chats.filter(c => c.isGroup)) {
+      try { await group.sendMessage('⚡ Bot Pro activo y listo para el grupo 😎'); } catch {}
     }
   } catch {}
 });
 
+// ---------------------------
+// Manejo de mensajes
+// ---------------------------
 client.on('message', async msg => {
-  const raw = msg.body || '';
-  const args = raw.trim().split(' ');
-  const command = args[0].toLowerCase();
+  const body = msg.body || '';
+  const args = body.trim().split(' ');
+  const cmd = args[0].toLowerCase();
   const text = args.slice(1).join(' ').trim();
   let chat;
   try { chat = await msg.getChat(); } catch { return; }
 
   try {
-    // ---------------------------
-    // Sticker automático seguro
-    // ---------------------------
+    // Sticker automático solo para imágenes
     if (msg.hasMedia) {
       try {
         const media = await msg.downloadMedia();
-        if (media.mimetype?.startsWith('image/')) {
+        if (media.mimetype?.startsWith('image/') && !media.filename?.endsWith('.webp')) {
           enqueue('sticker', './workers/stickerWorker.js', { media })
             .then(({ webp, tmpFile }) => {
-              try {
-                chat.sendMessage(new MessageMedia('image/webp', webp), { sendMediaAsSticker: true });
-              } catch {}
-              deleteTmpFile(tmpFile);
+              try { chat.sendMessage(new MessageMedia('image/webp', webp), { sendMediaAsSticker: true }); } catch {}
+              deleteTmp(tmpFile);
             })
-            .catch(err => logEvent('ERROR', 'Sticker falló', { error: err.message }));
+            .catch(err => log('ERROR', 'Sticker falló', { error: err.message }));
         }
       } catch {}
       return;
     }
 
     // ---------------------------
-    // Comando de menú
+    // Menú bonito
     // ---------------------------
-    if (command === '.bot') {
-      try {
-        await chat.sendMessage(`
-🎉 MENÚ DEL BOT 🎉
+    if (cmd === '.bot') {
+      const menu = `
+🌟 *😎🐐 Bot Pro - MENÚ* 🌟
+────────────────────────────
 💬 *.bot* — Mostrar menú
 👥 *.todos* — Etiquetar a todos
-🙈 *.hidetag <msg>* — Mensaje oculto
-📣 *.notify <msg>* — Aviso general
-`);
-      } catch {}
+🙈 *.hidetag <mensaje>* — Mensaje oculto
+📣 *.notify <mensaje>* — Aviso general
+🎲 *.parejas* — Formar parejas
+🤣 *.meme* — Enviar meme random
+────────────────────────────
+⚡ _Rápido, seguro y activo_ ⚡
+`;
+      try { await chat.sendMessage(menu); } catch {}
       return;
     }
 
     // ---------------------------
-    // Comando .todos
+    // .todos
     // ---------------------------
-    if (command === '.todos') {
-      try {
-        const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-        await sendSafeMessageRandom(chat, '📣 INVOCACIÓN:', mentions);
-      } catch {}
+    if (cmd === '.todos') {
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidId);
+      await batchSend(chat, '📣 INVOCACIÓN:', mentions);
       return;
     }
 
     // ---------------------------
-    // Comando .hidetag
+    // .hidetag
     // ---------------------------
-    if (command === '.hidetag') {
-      try {
-        const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-        await sendSafeMessageRandom(chat, text || 'Mensaje oculto:', mentions, 10, 1200, 3000);
-      } catch {}
+    if (cmd === '.hidetag') {
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidId);
+      await batchSend(chat, text || 'Mensaje oculto:', mentions, 10, 1200, 3000);
       return;
     }
 
     // ---------------------------
-    // Comando .notify
+    // .notify
     // ---------------------------
-    if (command === '.notify') {
+    if (cmd === '.notify') {
+      const mentions = chat.participants.map(p => p.id._serialized).filter(isValidId);
+      await batchSend(chat, `📢 ${text || 'Aviso general'}`, mentions, 8, 1500, 4000);
+      return;
+    }
+
+    // ---------------------------
+    // .parejas
+    // ---------------------------
+    if (cmd === '.parejas') {
+      const members = chat.participants.map(p => p.id._serialized).filter(isValidId);
+      if (members.length < 2) return chat.sendMessage('⚠️ No hay suficientes miembros para parejas.');
+      const shuffled = members.sort(() => 0.5 - Math.random());
+      const pairs = [];
+      for (let i = 0; i < shuffled.length; i += 2) {
+        if (i + 1 < shuffled.length) pairs.push([shuffled[i], shuffled[i + 1]]);
+        else pairs.push([shuffled[i]]);
+      }
+      let msgText = '💘 *Parejas del grupo* 💘\n──────────────────\n';
+      pairs.forEach((pair, i) => {
+        msgText += pair.length === 2
+          ? `🔹 Pareja ${i + 1}: @${pair[0].split('@')[0]} 💖 @${pair[1].split('@')[0]}\n`
+          : `🔹 Sola: @${pair[0].split('@')[0]}\n`;
+      });
+      await chat.sendMessage(msgText, { mentions: members });
+      return;
+    }
+
+    // ---------------------------
+    // .meme
+    // ---------------------------
+    if (cmd === '.meme') {
       try {
-        const mentions = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
-        await sendSafeMessageRandom(chat, `📢 ${text || 'Aviso general'}`, mentions, 8, 1500, 4000);
-      } catch {}
+        const meme = await enqueue('meme', './workers/memeWorker.js', {});
+        if (meme.error) throw new Error(meme.error);
+        await chat.sendMessage({ file: `data:image/jpeg;base64,${meme.base64}`, caption: '🤣 Meme random' });
+        deleteTmp(meme.tmpFile);
+      } catch (err) {
+        log('ERROR', 'Error en meme', { error: err.message });
+        await chat.sendMessage('⚠️ Falló al obtener meme 😅');
+      }
       return;
     }
 
   } catch (err) {
-    logEvent('ERROR', 'Error general', { error: err.message });
+    log('ERROR', 'Error general', { error: err.message });
     try { await chat.sendMessage('⚠️ Error interno, pero sigo activo 😎'); } catch {}
   }
 });
@@ -182,8 +205,8 @@ client.on('message', async msg => {
 client.initialize();
 
 // ---------------------------
-// Express
+// Express server
 // ---------------------------
 const app = express();
-app.get('/', (_, res) => res.send('😎 Bot Turbo Pro corriendo'));
-app.listen(process.env.PORT || 3000, '0.0.0.0', () => logEvent('INFO', '🌐 Servidor Express activo'));
+app.get('/', (_, res) => res.send('😎 Bot Pro corriendo'));
+app.listen(process.env.PORT || 3000, '0.0.0.0', () => log('INFO', '🌐 Servidor Express activo'));

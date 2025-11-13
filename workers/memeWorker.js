@@ -1,5 +1,5 @@
 // workers/memeWorker.js
-import { parentPort, workerData } from 'worker_threads';
+import { parentPort } from 'worker_threads';
 import fetch from 'node-fetch';
 import { MessageMedia } from 'baileys'; // Usamos baileys para enviar el mensaje
 
@@ -42,16 +42,10 @@ async function getRandomMemeUrl() {
 // Función principal para manejar el worker
 async function generateMeme() {
   try {
-    // Obtener URL de meme aleatorio
     const memeUrl = await getRandomMemeUrl();
-
-    // Descargar la imagen del meme
     const response = await fetch(memeUrl);
     const buffer = await response.buffer(); // Obtener la imagen como buffer
-
-    // Crear un mensaje de tipo media para enviarlo con Baileys
     const media = new MessageMedia('image/jpeg', buffer.toString('base64'));
-
     parentPort.postMessage({ status: 'success', media });
   } catch (err) {
     parentPort.postMessage({ status: 'error', error: err.message });

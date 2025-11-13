@@ -1,11 +1,9 @@
-import { Client, LocalAuth, MessageMedia } from 'baileys';
-import fetch from 'node-fetch';
+import { Client, LocalAuth, MessageMedia } from '@adiwajshing/baileys';
+import fetch from 'node-fetch'; // Se mantiene para descargar el meme
 import { Worker } from 'worker_threads';
 import fs from 'fs';
 import express from 'express';
-import path from 'path';
-import os from 'os';
-import { logEvent } from './utils'; // Importa la función de log
+import { logEvent } from './utils'; // Función de logging personalizada
 
 // ---------------------------
 // Configuración
@@ -22,7 +20,15 @@ if (!fs.existsSync('./assets')) fs.mkdirSync('./assets');
 const isValidUserId = id => typeof id === 'string' && id.includes('@');
 
 // ---------------------------
-// Enviar mensajes seguros
+// Verificar si el usuario es admin
+// ---------------------------
+async function isAdmin(chat, userId) {
+  const groupMetadata = await chat.getMetadata();
+  return groupMetadata.participants.some(participant => participant.id._serialized === userId && participant.isAdmin);
+}
+
+// ---------------------------
+// Enviar mensajes seguros (para evitar flood de mensajes)
 // ---------------------------
 async function sendSafeMessage(chat, text, mentions, batchSize = 5, minDelay = 1500, maxDelay = 3500) {
   try {
@@ -40,10 +46,17 @@ async function sendSafeMessage(chat, text, mentions, batchSize = 5, minDelay = 1
 // ---------------------------
 // Comando .meme
 // ---------------------------
-async function handleMemeCommand(chat) {
+async function handleMemeCommand(chat, userId) {
   try {
+    // Verificar si el usuario es admin
+    const isUserAdmin = await isAdmin(chat, userId);
+    if (!isUserAdmin) {
+      await chat.sendMessage('⚠️ *Solo los administradores pueden usar este comando* 😎');
+      return;
+    }
+
     const generatedMeme = await generateMemeWithWorker();
-    await chat.sendMessage('😂 Aquí va tu meme', { media: generatedMeme });
+    await chat.sendMessage('😂 Aquí va tu meme 🐐', { media: generatedMeme });
   } catch (err) {
     logEvent('ERROR', 'Error al obtener meme', { error: err.message });
     await chat.sendMessage('Ups, no pude conseguir un meme ahora 😅');
@@ -53,8 +66,15 @@ async function handleMemeCommand(chat) {
 // ---------------------------
 // Función para manejar el comando .parejas
 // ---------------------------
-async function handleParejasCommand(chat) {
+async function handleParejasCommand(chat, userId) {
   try {
+    // Verificar si el usuario es admin
+    const isUserAdmin = await isAdmin(chat, userId);
+    if (!isUserAdmin) {
+      await chat.sendMessage('⚠️ *Solo los administradores pueden usar este comando* 😎');
+      return;
+    }
+
     const participants = chat.participants.map(p => p.id._serialized).filter(isValidUserId);
     if (participants.length < 2) {
       await chat.sendMessage('No hay suficientes participantes para formar parejas 😅');
@@ -107,7 +127,6 @@ const client = new Client({
 
 client.on('qr', qr => {
   console.log('QR recibido: ', qr);
-  // Si quieres generar el código QR en consola
   require('qrcode-terminal').generate(qr, { small: true });
 });
 
@@ -117,7 +136,7 @@ client.on('ready', async () => {
     const chats = await client.getChats();
     const groups = chats.filter(c => c.isGroup);
     for (const group of groups) {
-      await group.sendMessage('Bot activo y listo');
+      await group.sendMessage('Bot activo y listo 🇫🇷🐐');
     }
   } catch (err) {
     logEvent('ERROR', 'Error al enviar mensaje de inicio', { error: err.message });
@@ -138,27 +157,30 @@ client.on('message', async msg => {
     return;
   }
 
+  const userId = msg.sender.id._serialized; // Obtener ID del usuario
+
   try {
     if (command === '.bot') {
       await chat.sendMessage(`
 🎉 *MENÚ DEL BOT ULTRA RÁPIDO* 🎉
 
-💬 *.bot* — Mostrar este menú
+😎 *.bot* — Mostrar este menú
 👥 *.todos* — Etiquetar a todos
 🙈 *.hidetag <msg>* — Mensaje oculto
 📣 *.notify <msg>* — Aviso general
-😂 *.meme* — Meme aleatorio
-❤️ *.parejas* — Formar parejas al azar`);
+😂 *.meme* — Meme aleatorio 🐐
+❤️ *.parejas* — Formar parejas al azar 🇫🇷
+`);
       return;
     }
 
     if (command === '.meme') {
-      await handleMemeCommand(chat);
+      await handleMemeCommand(chat, userId);
       return;
     }
 
     if (command === '.parejas') {
-      await handleParejasCommand(chat);
+      await handleParejasCommand(chat, userId);
       return;
     }
 
@@ -176,5 +198,5 @@ client.initialize();
 // Servidor Express
 // ---------------------------
 const app = express();
-app.get('/', (_, res) => res.send('Bot corriendo'));
+app.get('/', (_, res) => res.send('Bot corriendo 🇫🇷🐐'));
 app.listen(process.env.PORT || 3000, '0.0.0.0', () => logEvent('INFO', 'Servidor Express activo'));

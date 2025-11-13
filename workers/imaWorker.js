@@ -1,18 +1,20 @@
-// workers/imageWorker.js
 import { parentPort, workerData } from 'worker_threads';
-import { generateImage } from '../lib/imageAPI.js'; // tu API de imágenes
+import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 (async () => {
   try {
-    const prompt = workerData.prompt;
-    const tmpFile = path.join(os.tmpdir(), `img-${Date.now()}.jpg`);
+    const { media } = workerData;
+    const tmpFile = path.join('./tmp', `ima-${Date.now()}.png`);
+    const buffer = Buffer.from(media.data, 'base64');
 
-    const base64 = await generateImage(prompt); // Devuelve base64
-    fs.writeFileSync(tmpFile, Buffer.from(base64, 'base64'));
+    await sharp(buffer)
+      .resize(800)
+      .grayscale()
+      .toFile(tmpFile);
 
+    const base64 = fs.readFileSync(tmpFile, { encoding: 'base64' });
     parentPort.postMessage({ base64, tmpFile });
   } catch (err) {
     parentPort.postMessage({ error: err.message });

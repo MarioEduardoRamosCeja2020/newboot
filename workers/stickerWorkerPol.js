@@ -1,26 +1,27 @@
-import { Worker } from 'worker_threads';
-const MAX_WORKERS = 4; // Puedes aumentar según CPU
-const queue = [];
-let activeWorkers = 0;
+import { parentPort, workerData } from 'worker_threads';
+import sharp from 'sharp';
+import fs from 'fs';
+import path from 'path';
 
-export function enqueueSticker(mediaData) {
-  return new Promise((resolve, reject) => {
-    queue.push({ mediaData, resolve, reject });
-    processQueue();
-  });
-}
+(async () => {
+  try {
+    const { mediaArray } = workerData;
+    const webpArray = [];
+    const tmpFiles = [];
 
-function processQueue() {
-  if (queue.length === 0 || activeWorkers >= MAX_WORKERS) return;
+    for (const media of mediaArray) {
+      const tmpFile = path.join('./tmp', `sticker-pol-${Date.now()}.webp`);
+      tmpFiles.push(tmpFile);
+      const buffer = Buffer.from(media.data, 'base64');
+      await sharp(buffer)
+        .resize(512, 512, { fit: 'contain' })
+        .webp()
+        .toFile(tmpFile);
+      webpArray.push(fs.readFileSync(tmpFile, { encoding: 'base64' }));
+    }
 
-  const { mediaData, resolve, reject } = queue.shift();
-  activeWorkers++;
-
-  const worker = new Worker('./workers/stickerWorker.js', { workerData: { mediaData } });
-  worker.on('message', msg => msg.error ? reject(msg.error) : resolve(msg));
-  worker.on('error', reject);
-  worker.on('exit', () => {
-    activeWorkers--;
-    processQueue();
-  });
-}
+    parentPort.postMessage({ webpArray, tmpFiles });
+  } catch (err) {
+    parentPort.postMessage({ error: err.message });
+  }
+})();
